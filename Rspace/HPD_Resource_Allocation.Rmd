@@ -1,0 +1,276 @@
+---
+title: "Offense_Prediction_NIBRS"
+author: "Krishna Prasad"
+date: "8/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Check Installed Packages, warning=FALSE}
+
+# Check if all the required libraries are installed, if not install it
+
+list.of.packages <-   c(
+  "lubridate",
+  "dplyr",
+  "rpart.plot",
+  "MASS",
+  "DMwR2",
+  "utils"
+)
+new.packages <-
+  list.of.packages[!(list.of.packages %in% installed.packages()[, "Package"])]
+if (length(new.packages))
+  install.packages(new.packages)
+
+```
+
+
+```{r Import libraries,message=FALSE, warning=FALSE}
+
+library(dplyr)
+library(lubridate)
+library(MASS)
+library(utils)
+library(rpart.plot)
+library(DMwR2)
+
+```
+
+
+
+```{r Read File, message=FALSE, warning=FALSE}
+
+crime_data_file <- paste(".", "/", "2019_Imputed_New.xlsx", sep = "")
+
+# If 2019_Imputed file already exist then skip download
+if (file.exists(crime_data_file)) {
+  # Read the 2019_Imputed.xlsx file into a data frame
+  crime_data <-
+    readxl::read_excel(crime_data_file,
+                       col_names = TRUE,
+                       trim_ws = TRUE)
+  
+  # Modify the Occurance date column to extrapolate more information
+  # there by creating new columns related to time, day and month
+  crime_data <- mutate(
+    crime_data,
+    occurrence_date = as.Date(crime_data$occurrence_date),
+    occurrence_weekday_num = wday(as.Date(crime_data$occurrence_date)),
+    occurrence_weekday = weekdays(as.Date(crime_data$occurrence_date)),
+    occurrence_year = year(as.Date(crime_data$occurrence_date)),
+    occurrence_month = month(as.Date(crime_data$occurrence_date)),
+    offense_count = as.numeric(offense_count),
+    beat = as.factor(crime_data$beat),
+    block_start = as.factor(crime_data$block_start),
+    block_end= as.factor(crime_data$block_end),
+    zip = as.factor(crime_data$zip)
+  )
+  
+  # Reorder columns to be able see and relate all the columns
+  crime_data <-
+    crime_data %>% dplyr::select(occurrence_date,
+      occurrence_weekday_num,
+      occurrence_weekday,
+      occurrence_year,
+      occurrence_month,
+      occurrence_hour,
+      nibrs_description,
+      crime_against,
+      offense_count,
+      beat,
+      premise,
+      block_start,
+      block_end,
+      street_name,
+      street_type,
+      suffix,
+      zip,
+      latitude,
+      longitude
+    )
+}
+```
+
+```{r Create Aggregated dataset, warning=FALSE}
+
+# Select the 3 columns from crime data frame
+crime <-
+  crime_data %>% dplyr::select(occurrence_date, beat, offense_count)
+
+
+# Group crime data by beat and occurrence date and summarizing by sum of offense counts and order by beat and occurrence date
+crime_beat_group <-
+  crime %>% group_by(beat, occurrence_date) %>% dplyr::summarize(count_by_beat = sum(offense_count)) %>% arrange(beat, occurrence_date)
+
+
+crime_beat_group <-
+  crime_beat_group %>%
+  group_by(beat) %>%
+  mutate(count_by_beat_lag = dplyr::lag(count_by_beat, n = 1, default = NA))
+crime_beat_group <-
+  crime_beat_group %>%
+  group_by(beat) %>%
+  mutate(count_by_beat_lag_7 = dplyr::lag(count_by_beat, n = 7, default = NA))
+
+# Remove the last row as will be an NA
+# spl_test <- crime_beat_group[nrow(crime_beat_group),]
+crime_beat_group <- crime_beat_group[-nrow(crime_beat_group),]
+
+# Mutate and add beat number column as factors
+crime_beat_group <- mutate(
+  crime_beat_group,
+  beat = as.factor(beat),
+  occurrence_day = as.factor(format(occurrence_date, "%d")),
+  occurrence_month = as.factor(month(occurrence_date)),
+  occurrence_weekday_num = as.factor(wday(occurrence_date))
+)
+
+# Remove the occurrence date column
+crime_beat_group <- crime_beat_group[-c(2)]
+
+# Removing beats as no proper data exists and erroring out when in test set
+crime_beat_group <- crime_beat_group[!(crime_beat_group$beat %in% c("HCC4","HCC3", "HCC5", "HCC7", "HCSO", "OOJ")),]
+
+  str(crime_beat_group)
+
+```
+
+```{r Create test/train sets, warning=FALSE}
+ 
+ ## 80% of the sample size
+smp_size <- floor(0.80 * nrow(crime_beat_group))
+
+## set the seed to make your partition reproducible
+set.seed(12345)
+train_ind <- sample(seq_len(nrow(crime_beat_group)), size = smp_size)
+
+# Create test and train data
+train <- crime_beat_group[train_ind, ]
+test <- crime_beat_group[-train_ind, ]
+
+```
+
+```{r Validate, warning=FALSE}
+ValidateResults <- function(crime_model) {
+  # predict on test data
+  crime.model.pred <- predict(crime_model, test, type= "response")
+  
+  # rmse
+  rmse <- sqrt(mean((test$count_by_beat_lead - crime.model.pred)^2))
+  print(paste("RMSE = ", rmse))
+  
+  #mae
+  mae <- mean(abs(crime.model.pred-test$count_by_beat_lead),na.rm=T) 
+  print(paste("MAE = ", mae))
+  
+  # actual vs predicted graph
+  validate <- data.frame(test$count_by_beat_lead, crime.model.pred)
+  print(validate)
+  names(validate) <- c("actual", "predicted")
+  names(validate)
+
+  # decile predictions
+  validate$bucket <- with(validate, cut(predicted, breaks= quantile(predicted, probs= seq(0, 1, 0.1)),
+  include.lowest= TRUE, labels= c(1:10)))
+
+  # average values of actual and predicted by decile
+  validate <- aggregate(validate[, c('actual', 'predicted')], by= list(validate$bucket), FUN = mean)
+  
+  # plot
+  plot(validate$predicted, col= "red", type= "l", lwd= 1.5, ylab= "No. of Offenses",
+       xlab= "Predicted Crimes Decile", main= "Actual vs. Predicted")
+  lines(validate$actual, col= "blue", lwd= 1.5)
+  legend("topleft", c("Actual", "Predicted"), col= c("blue", "red"), lwd= c(1.5, 1.5), bty= "n", cex= 0.8)
+}
+```
+
+```{r Linear Regression, warning=FALSE}
+
+# Linear regression using lm
+crime_lm <-  lm(count_by_beat_lead ~ count_by_beat + beat + occurrence_weekday_num + occurrence_month + occurrence_day, train)
+
+# Summary of results
+summary(crime_lm)
+
+# Call validate results to check accuracy
+ValidateResults(crime_lm)
+
+```
+
+
+```{r Negative Binomial, warning=FALSE}
+
+# Negative binomial using glm
+crime_glm <-  glm.nb(count_by_beat_lead ~ count_by_beat + occurrence_weekday_num + occurrence_month + occurrence_day + beat, train, link = log)
+
+# Summary of results
+summary(crime_glm)
+
+# Call validate results to check accuracy
+ValidateResults(crime_glm)
+
+```
+
+```{r Decision Trees, warning=FALSE}
+
+# CART model
+crime_tree <-
+  rpartXse(
+    count_by_beat_lead ~ count_by_beat + occurrence_weekday_num + occurrence_month + occurrence_day + beat,
+    train
+  )
+prp(crime_tree)
+
+# Predict for test data
+preds_tree <- predict(crime_tree, test)
+
+mae_dt <- mean(abs(preds_tree - test$count_by_beat_lead), na.rm = T)
+print(paste("MAE = ", mae_dt))
+
+mse_dt <- mean((test$count_by_beat_lead - preds_tree) ^ 2)
+print(paste("MSE = ", mse_dt))
+
+rmse_dt <- sqrt(mean((test$count_by_beat_lead - preds_tree) ^ 2))
+print(paste("RMSE = ", rmse_dt))
+
+summary(crime_tree)
+
+validate <- data.frame(test$count_by_beat_lead, preds_tree)
+
+```
+
+
+```{r Performance Estimations}
+
+# # Performance estimation task to learn the data using all the techniques 
+# # with 10-fold cross validation running multiple times
+# # This task takes a little while to execute
+# crime_learner <- performanceEstimation(
+#   PredTask(
+#     count_by_beat_lead ~ count_by_beat + beat_number + occurrence_day + occurrence_weekday_num,
+#     crime_beat_group
+#   ),
+#   workflowVariants(
+#     "standardWF",
+#     learner = c("lm", "glm.nb","svm")
+#   ),
+#   EstimationTask(metrics = c("nmse","nmae","rmse"), method = CV(nReps = 2, nFolds = 10))
+# )
+# 
+# # Summary after learning
+# summary(crime_learner)
+# 
+# # Rank the techniques
+# rankWorkflows(crime_learner , 3)
+# 
+# # Plot a box plot of all the techniques
+# plot(crime_learner)
+# 
+# # Print the top performing techniques
+# topPerformers(crime_learner)
+
+```

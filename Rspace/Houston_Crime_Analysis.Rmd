@@ -1,0 +1,1027 @@
+---
+title: "Houston Crime Analysis"
+author: "Krishna Prasad"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    css: style.css
+    highlight: pygment
+    theme: united
+    toc: yes
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, dpi=100)
+```
+
+
+```{r Check installed packages, echo = FALSE}
+
+# Function to Install and Load R Packages
+install.load.packages <- function(required.packages)
+{
+  required.packages <-
+    required.packages[!(required.packages %in% installed.packages()[, "Package"])]
+  
+  
+  if (length(required.packages))
+  {
+    install.packages(required.packages, repos = 'http://cran.us.r-project.org');
+  }
+  for (package.name in required.packages)
+  {
+    library(package.name,
+            character.only = TRUE,
+            quietly = TRUE)
+    
+  }
+}
+
+# Specify the list of required packages to be installed and load
+required.packages = c(
+  "openxlsx",
+  "tidyverse",
+  "VIM",
+  "lubridate",
+  "cowplot",
+  "ggplot2",
+  "zipcode",
+  "leaflet",
+  "maps",
+  "htmlwidgets",
+  "magrittr",
+  "leaflet.extras",
+  "htmltools"
+)
+
+
+# Call the Function
+install.load.packages(required.packages)
+
+
+```
+
+
+```{r Import Data, echo = FALSE}
+library(htmltools)
+library(openxlsx)
+library(tidyverse)
+library(lubridate)
+library(VIM)
+library(cowplot)
+library(ggplot2)
+library(zipcode)
+library(leaflet)
+library(maps)
+library(htmlwidgets)
+library(magrittr)
+library(leaflet.extras)
+
+```
+
+------
+
+# Problem Description and Objectives
+
+[Houston Police Department](https://www.houstontx.gov) provide data with information on crime events at different locations of the city of Houston, Texas. Using data available at [Houston Police Department Crime Statistics](https://www.houstontx.gov/police/cs/Monthly_Crime_Data_by_Street_and_Police_Beat.htm), our objective is to import the data into R to carry out exploratory data analysis and provide some useful insights to the police department.
+
+The information contained in these reports is a monthly breakdown of all the offenses in Houston city. The data is broken down by police districts and beats, and displayed by street name and block range.
+
+# Data Description
+
+The main data source provided by the Houston Police Department is integrated with two other data sources [Offenses mapping](https://ucr.fbi.gov/nibrs/2011/resources/nibrs-offense-codes/view) and the zip codes package available in R help in analyzing the crime statics better.
+
+* The offenses mapping provide higher level information about who/how/where the crime happened against. Below are few examples which illustrates what the data set provides:
+
+    * If nibrs description is related to theft then the crime is against property
+    * If nibrs description is related to assaults then the crime is against a person
+    * If nibrs description is related to drugs then the crime is against society
+    
+* The zip code data provides information on latitudes and longitudes for uses in mapping data.
+
+# Data Pre-Processing
+  
+  * Downloaded all the files from [Houston Police Department Crime Statistics](https://www.houstontx.gov/police/cs/Monthly_Crime_Data_by_Street_and_Police_Beat.htm) website and save it locally. 
+
+
+```{r Initialize Data, echo = FALSE}
+
+uri <- "https://www.houstontx.gov/police/cs/xls/"
+
+filename <-
+  c(
+    "01-2019.NIBRS_Public_Data_Group_A&B.xlsx",
+    "02-2019.NIBRS_Public_Data_Group_A&B.xlsx",
+    "03-2019.NIBRS_Public_Data_Group_A&B.xlsx",
+    "4-2019.NIBRS_Public_Data_Group_A&B.XLSX",
+    "5-2019.NIBRS_Public_Data_Group_A&B.xlsx"
+  )
+
+data_directory <- paste(".", "/Data", sep = "")
+
+crime_data_file <- paste(".", "/", "2019_Imputed_New.xlsx", sep = "")
+
+zipcodes <- data(zipcode)
+
+```
+
+
+```{r Download Data}
+
+#
+# Downloads the data from the website and places all the files in the data directory in the current location
+# Returns the list of all files downloded
+#
+download_files <- function(filename) {
+  
+  files_count = 1
+  
+  # Check if data directory exists else create one
+  if (!dir.exists(data_directory))
+    dir.create(data_directory)
+  
+  # Download each file in the filename vector
+  for (nibrs_file in filename) {
+    # Set files path
+    nibrs_xls_file <-
+      paste(data_directory, "/", nibrs_file, sep = "")
+    
+    # Download file
+    download.file(paste(uri, nibrs_file, sep = ""), nibrs_xls_file, method = "curl")
+    
+    # Set a new file name for the downloaded file
+    new_file_name <-
+      paste0(data_directory, "/", files_count, "-2019", sep = "")
+    
+    # Rename file
+    file.rename(nibrs_xls_file,
+                paste(new_file_name, ".xlsx", sep = ""))
+    
+    files_count = files_count + 1
+  }
+  
+  # List all the files in the data directory
+  all_files <-
+    list.files(path = data_directory,
+               pattern = ".xlsx",
+               full.names = TRUE)
+  return(all_files)
+}
+```
+
+
+* Consolidated all the files by removing all irrelevant rows and columns from the data sets
+
+
+```{r Remove cols and reformat }
+
+#
+# Removes all the irrelavent columns, Consolidates all the files and returns a data frame
+#
+consolidate_data <- function(all_files) {
+  
+  counter <- 0
+  
+  # For each file in the data directory
+  for (item in all_files) {
+    # Read the file by skipping the first 11 rows in each file
+    my_data <-
+      readxl::read_excel(item,
+                         skip = 11,
+                         col_names = TRUE,
+                         na = "NA")
+    
+    # After removing the first 11 lines, in Apr and May files there are 11 valid columns
+    # and Jan, Feb, Mar have only 10 valid columns
+    # Hence the invalid columns are at different indexes which needs to be removed
+    # THIS PART NEEDS TO BE HANDLED BETTER
+    if (grepl("4-2019", item) | grepl("5-2019", item)) {
+      my_data <- my_data[-c(2, 5, 6, 11, 13, 14, 17)]
+    }
+    else{
+      my_data <- my_data[-c(2, 4, 6, 11, 13, 14, 16)]
+    }
+    
+    if (counter == 0) {
+      consolidated_data <- my_data
+    }
+    else {
+      # fill in non-overlapping columns with NAs as there are 11 columns for Apr, May and 10 for other months
+      consolidated_data[setdiff(names(my_data), names(consolidated_data))] <- NA
+      my_data[setdiff(names(consolidated_data), names(my_data))] <- NA
+      
+      # Bind data for all the months
+      consolidated_data <- rbind(consolidated_data, my_data)
+    }
+    rm(my_data)
+    counter = counter + 1
+  }
+  # Write consolidated data to xlsx file
+  write.xlsx(consolidated_data,
+             paste(data_directory, "/", "2019.xlsx", sep = ""))
+  
+  return(consolidated_data)
+}
+
+```
+
+
+* Offenses mapping and zip codes packages are joined to the Houston data set to help with binning of offense descriptions.
+
+
+```{r Clean and reorder data, message=FALSE, warning=FALSE}
+
+#
+# Join the Offenses mapping file, Rename, separate and reorder columns
+# Returns the new dataframe 
+#
+
+reorder_clean <- function(consolidated_data) {
+    
+    # Read the consolidated xlsx file
+    crime_data <- consolidated_data
+    
+    # Read the Offense Mapping file
+    offense_map <-
+      readxl::read_excel(
+        paste(".", "/", "offenses_mapping.xlsx", sep = ""),
+        col_names = TRUE,
+        trim_ws = TRUE
+      )
+    
+    # Rename the columns consistently into lowercase and without spaces
+    crime_data <-
+      crime_data %>% rename_all(funs(str_replace(., " ", "_"))) %>% rename_all(tolower)
+    
+    # Separate the Block range column
+    crime_data <-
+      separate(crime_data,
+               block_range,
+               into = as.character(c("block_start", "block_end")),
+               sep = "-")
+    
+    # Join with offense list to add the crime against column into the dataset
+    crime_data <-
+      inner_join(crime_data, offense_map, by = "nibrs_description")
+
+    
+    return(crime_data)
+}
+
+```
+
+
+* Using the zip code information available for Apr and May along with the blocks, street and beat information, all the NA values are filled for beats, blocks and zips using **KNN imputation technique**. 
+
+
+```{r Fill NAs using KNN Imputations}
+
+#
+# Impute Beat, Blocks and zip values using KNN imputations, Saves the new file in the current location
+# Returns the modified dataframe with all the imputed values
+#
+
+fill_values_using_knn <- function(crime_data) {
+  # Convert beat, block_start, block_end, zip into factors
+  crime_factors <- c("beat", "block_start", "block_end", "zip")
+  crime_data[crime_factors] <-
+    sapply(crime_data[crime_factors], as.factor)
+  
+  # Perform KNN imputations on the above columns to fill in NA values
+  crime_data_imputed <-
+    kNN(
+      crime_data,
+      variable = c("beat", "block_start", "block_end", "zip"),
+      dist_var = c(
+        "beat",
+        "block_start",
+        "block_end",
+        "street_name",
+        "street_type",
+        "suffix",
+        "zip"
+      ),
+      k = 5,
+      trace = FALSE
+    )
+  
+  # Remove the extra trace columns
+  crime_data_imputed <- crime_data_imputed[-c(18, 19, 20, 21)]
+  
+  # Join with zipcodes to add the latitude and longitude column into the dataset
+  crime_data_imputed <- crime_data_imputed %>%
+    inner_join(select(zipcode, zip, latitude, longitude), by = "zip")
+  
+  # Write imputed crime data to xlsx file
+  write.xlsx(crime_data_imputed,
+             paste(data_directory, "/", "2019_Imputed_New.xlsx", sep = ""))
+  
+  # copy file to current folder
+  file.copy(paste(data_directory, "/", "2019_Imputed_New.xlsx", sep = ""), ".")
+  
+  return(crime_data_imputed)
+}
+
+```
+
+
+* Variables in the data set can be categorized into quantitative and categorical variables. Below is some important information on the data types of the variables and their significance:
+
+
+    + `occurrence_date` - Date column representing the year, month and day the incident happened.
+    + `occurrence_hour` - Nominal/categorical variables describing the hour of the day the incident occured.
+    + `nibrs_description` - Nominal/categorical(label) varible describing the incident
+    + `offense_count` - Quantitative variable describing the count of charges for that incident
+    + `beat` - Nominal/categorical(label) variable specifying in which beat the incident occured.
+    + `premise` - Nominal/categorical(label) variable describing where the indicident occured
+    + `block start/end` - Nominal/categorical variable specifying in which block ranges the incident occured
+    + `street_name/street_type/suffix` - Nominal/categorical variable specifying in which streets the incident occured
+    + `zip` - Nominal/categorical variables specifying in which zipcode incident occured
+
+
+* The occurrence_date is extrapolated into `occurrence_day, occurrence_month, occurrence_weekday, occurrence_weekday_num`
+
+
+```{r Call functions,echo=FALSE, message=FALSE}
+
+# If 2019_Imputed file already exist then skip download
+if (file.exists(crime_data_file)) {
+  # Read the 2019_Imputed.xlsx file into a data frame
+  crime_data <-
+    readxl::read_excel(crime_data_file,
+                       col_names = TRUE,
+                       trim_ws = TRUE)
+  
+  # Modify the Occurance date column to extrapolate more information
+  # there by creating new columns related to time, day and month
+  crime_data <- mutate(
+    crime_data,
+    occurrence_date = as.Date(crime_data$occurrence_date),
+    occurrence_weekday_num = as.factor(wday(as.Date(crime_data$occurrence_date))),
+    occurrence_weekday = as.factor(weekdays(as.Date(crime_data$occurrence_date))),
+    occurrence_month = as.factor(month(as.Date(crime_data$occurrence_date))),
+    beat = as.factor(crime_data$beat),
+    block_start = as.factor(crime_data$block_start),
+    block_end= as.factor(crime_data$block_end),
+    zip = as.factor(crime_data$zip)
+  )
+  
+  # Reorder columns to be able see and relate all the columns
+  crime_data <-
+    crime_data %>% dplyr::select(
+      occurrence_date,
+      occurrence_weekday_num,
+      occurrence_weekday,
+      occurrence_year,
+      occurrence_month,
+      occurrence_hour,
+      nibrs_description,
+      crime_against,
+      offense_count,
+      beat,
+      premise,
+      block_start,
+      block_end,
+      street_name,
+      street_type,
+      suffix,
+      zip,
+      latitude,
+      longitude
+    )
+  
+} else {
+  # Call all the functions to download, reformat, consolidate, clean and impute data
+  files_list <- download_files(filename)
+  crime_data <- consolidate_data(files_list)
+  crime_data <- reorder_clean(crime_data)
+  crime_data <- fill_values_using_knn(crime_data)
+}
+
+glimpse(crime_data)
+```
+
+
+# Exploratory Data Analysis
+
+
+Data summaries try to provide overviews of key properties of the data. More specifically, they try to describe important properties of the distribution of the values across the observations in a data set.
+
+
+## Summary of Houston Crime Data
+
+```{r Crime Data Summary}
+summary(crime_data)
+```
+
+## Data Visualizations
+
+### Total count of offenses month over month
+
+```{r Monthly Crimes}
+
+# Group by month and sum of offense counts
+crime_monthly <-
+  group_by(crime_data,
+           OccurenceMonths = format(crime_data$occurrence_date, "%B")) %>%  dplyr::summarize(Count = sum(offense_count))
+
+# Create a Bar plot using the crime_monthly dataframe
+ggplot(crime_monthly, aes(
+  x = factor(OccurenceMonths, levels = month.name),
+  y = Count,
+  fill = OccurenceMonths
+)) +
+  geom_bar(stat = "identity", width = 0.6, fill = "steelblue") +
+  geom_text(aes(label = Count),
+            vjust = 1.6,
+            color = "white",
+            size = 3) +
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Total crime occurences by month",
+       x = "Occurence Month", y = "Total Offense Counts")
+
+```
+
+* The above graph shows the total monthly count (Jan-May’19) of all the crimes in the city of Houston.
+* The monthly crime in the city of Houston has been steadily increasing, with the exception of February-which saw a dip in the total count of crime occurrences.
+
+
+### Total count of offenses by day of a week
+
+```{r Crimes per day}
+
+# Group by weekday ans summarize by adding up all the offense counts
+crime_week <-
+  group_by(
+    crime_data,
+    DayOccurence = as.factor(occurrence_weekday)
+  ) %>% dplyr::summarize(Count = sum(offense_count)) 
+
+
+# Craete a Bar plot
+ggplot(crime_week, aes(
+  x = factor(
+    DayOccurence,
+    levels = c(
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday"
+    )
+  ),
+  y = Count
+))  +  
+  geom_bar(stat = "identity", width = 0.6, fill = "steelblue") +
+    geom_text(aes(label = Count),
+            vjust = 1.6,
+            color = "white",
+            size = 3) +
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Total crime occurences by day of week",
+       x = "Occurence Day", y = "Total Offense Counts")
+
+
+```
+
+* Interestingly mid of the week has the highest crime count in the city of Houston. 
+* Fridays has a higher total offense count. 
+
+### Total count of offenses by hour of a day
+
+```{r Crimes per hour of the day}
+
+# Group crime data by hour of day
+crime_hr <-
+  group_by(
+    crime_data,
+    OccurenceHour = as.factor(occurrence_hour)
+  ) %>%  dplyr::summarize(Count = sum(offense_count)) %>% arrange( OccurenceHour) 
+
+# Plot a line graph
+ggplot(data = crime_hr, aes(x = OccurenceHour,
+                            y = Count,
+                            group = 1)) +
+  geom_line(aes(color = "blue"), size = 1.5) +
+  geom_point(size = 0.5) +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +
+  geom_text(aes(label = Count), hjust = .5, vjust = 1.4) +
+  scale_color_brewer(palette = "Paired") +
+  labs(title = "Total crimes per hour of day", x = "Occurence Hour", y = "Total Offense Count")
+
+
+```
+
+* Noon and 6PM of the day are seem to be the times of the day when the highest offenses happen. It is possible that too many thefts could increase the offense count in the mid day. 
+
+
+### Offenses distribution by month
+
+```{r Offense Distribution}
+# Select Occurrence Data and offense count Group by date
+offense_dist <-
+  crime_data %>% dplyr::select(occurrence_date, offense_count) %>% group_by(occurrence_date) %>%
+  summarise(Count = sum(offense_count))
+
+# Plot a time series graph showing the distribution of offenses over 5 months period
+ggplot(offense_dist,
+       aes(x = offense_dist$occurrence_date, y = offense_dist$Count)) +
+  geom_line(color = "steelblue") +
+  geom_hline(
+    aes(yintercept = mean(offense_dist$Count)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  geom_smooth(method = 'lm') +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +
+  scale_color_brewer(palette = "Paired") +
+  labs(title = "Distributions of offenses over time", x = "Occurence Months", y = "Offense Counts")
+
+
+
+```
+
+* There has been only one day over the period of 5 months where there were 10 offenses in a single day. It is possible that it could be a measurement issue or an outlier.
+* Only 4 days where there were zero offenses, which may imply that the police did not charge any one with offenses or it could also be a measurement error.
+* There had been a steady increase in the offenses month over month from 650 to 750 with an average offenses at 700 per month.
+
+### Top 10 crimes in Houston
+
+```{r Top 10 Crimes in Houston}
+
+# Group by offense description
+top_crimes <-
+  group_by(
+    crime_data,
+    Offenses = nibrs_description
+  ) %>%  dplyr::summarize(Count = sum(offense_count)) %>%  arrange( desc(Count)) %>%
+  top_n(10)
+
+
+# Horizontal Bar plot
+ggplot(top_crimes, aes(
+  x = reorder(Offenses, Count),
+  y = Count,
+  fill = Offenses
+)) +
+  geom_bar(stat = "identity", width = 0.6, fill = "steelblue") +
+  coord_flip() +
+  geom_text(aes(label = Count),
+            hjust = 1.6,
+            color = "white",
+            size = 3.5) +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Top 10 Crimes in Houston",
+       x = "Offenses", y = "Total Offense Counts")
+
+```
+
+* Simple Assaults and Motor vehicle thefts are high
+* Very generic categories like "All other offenses" or "All other larceny" are also in the top 10 which might not tell a whole lot about the offense. HPD may have to further classify them clearly to be able to explain those crimes better  . 
+* Drug and narcotics made it to the top 10 showcasing a lot of societal crimes in the city of Houston. 
+
+
+### Beats affected per day
+
+```{r Beats affected per day}
+# Select Occurrence Data and offense count Group by date
+beat_dist <-
+  crime_data %>% dplyr::select(occurrence_date, beat) %>% group_by(occurrence_date, beat) %>%
+  summarise(CountOfBeat = unique(length(beat))) %>% group_by(occurrence_date) %>% summarise(CountOfBeat = length(CountOfBeat))
+
+
+# Plot a time series graph showing the distribution of offenses over 5 months period
+ggplot(beat_dist,
+       aes(x = beat_dist$occurrence_date, y = beat_dist$CountOfBeat)) +
+  geom_line(color = "steelblue") +
+  geom_hline(
+    aes(yintercept = mean(beat_dist$CountOfBeat)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  geom_smooth(method = 'lm') +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +
+  scale_color_brewer(palette = "Paired") +
+  labs(title = "Beats Affected Per Day", x = "Occurence Months", y = "Beat Frequency")
+
+```
+
+* On an average there are 107 beats affected with crime everyday out of the 126 beats.
+* On Apr 6th, there were 114 beats which were affected with crime. 
+
+
+### Top 10 crimes month over month
+
+```{r Monthly Top 10 Crimes in Houston}
+
+# Filter the top 10 offenses descriptions
+top.10.crimes.by.month_temp <-
+  crime_data %>% dplyr::select(occurrence_date, nibrs_description, offense_count) %>% filter(
+    crime_data$nibrs_description %in% c(
+      "Simple assault",
+      "Theft from motor vehicle",
+      "All other offenses",
+      "Destruction, damage, vandalism",
+      "All other larceny",
+      "Burglary, Breaking and Entering",
+      "Intimidation",
+      "Aggravated Assault",
+      "Motor vehicle theft",
+      "Drug, narcotic violations"
+    )
+  )
+
+# Group by month and offenses description
+top.10.crimes.by.month <- group_by(
+  top.10.crimes.by.month_temp,
+  OccurenceMonths = format(occurrence_date, "%B"),
+  OffenseDescription = nibrs_description
+) %>%  dplyr::summarize(Count = sum(offense_count)) %>% arrange(desc(Count))
+
+# Plot a line graph
+ggplot(data = top.10.crimes.by.month,
+       aes(
+         x = factor(OccurenceMonths, levels = month.name),
+         y = Count,
+         color = OffenseDescription,
+         group = OffenseDescription
+       )) +
+  geom_line(size = 1) +
+  geom_point() +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = "Top 10 Crimes in Houston",
+       x = "Occurrence Months",
+       y = "Top 10 Crimes in Houston by Month") +
+  guides(fill = guide_legend(reverse = TRUE, title = "Offense Description"))
+
+
+```
+
+* Simple Assault and Thefts from motor vehicle are at the top with more than 2200 offenses happening month over month.
+* Any Thefts related offenses have spiked between the months of March and May
+* Drugs and narcotics offenses, Aggravated assaults are in a steady rise
+* All other offenses and All other larceny seems to be steady. 
+
+### Top 10 crimes in the most unsafe beats
+
+```{r Top 10 crimes by beats}
+
+# Filter the top 10 assaults from Crime data
+top_crimes_beats_temp <-
+  crime_data %>% dplyr::select(nibrs_description, beat, offense_count) %>% filter(
+    crime_data$nibrs_description %in% c(
+      "Simple assault",
+      "Theft from motor vehicle",
+      "All other offenses",
+      "Destruction, damage, vandalism",
+      "All other larceny",
+      "Burglary, Breaking and Entering",
+      "Intimidation",
+      "Aggravated Assault",
+      "Motor vehicle theft",
+      "Drug, narcotic violations"
+    )
+  )
+
+# Group by beat and offense description
+top_crimes_beats <-
+  group_by(top_crimes_beats_temp,
+           beat, nibrs_description) %>%  dplyr::summarize(beatCount = sum(offense_count)) %>%
+  arrange(desc(beatCount), nibrs_description) %>% top_n(5) 
+
+# Filter the top 10 Beats with high crime
+top_crimes_beats <-  dplyr::filter(
+             top_crimes_beats,
+             as.character(beat) %in% c(
+               "17E10",
+               "14D20",
+               "15E40",
+               "22B20",
+               "19G10",
+               "1A10",
+               "17E40",
+               "12D10",
+               "1A20",
+               "7C20"
+             )
+           ) 
+
+# Plot a ballon chart
+p <- ggplot(top_crimes_beats, aes(x = beat, y = nibrs_description))
+p + geom_point(
+  aes(size = beatCount),
+  shape = 21,
+  colour = "steelblue",
+  fill = "steelblue"
+) +
+  theme(plot.title = element_text(hjust = 0.5),
+    panel.background = element_blank(),
+    
+    panel.border = element_rect(
+      colour = "black",
+      fill = NA,
+      size = 1
+    )
+  ) +
+  scale_size_area(max_size = 12) +
+  labs(title = "Top 10 Crimes by beat", x = "Beats", y = "Offense Descriptions")
+
+```
+
+* 1A20 beat has the highest number of motor vehicle thefts
+* "Simple Assault", "Destruction, damage, vandalism" and "All other offenses" seems to be consistently happening in all beats
+* 12D10 beat seems to be the lowest and less dangerous beat of all the 10 beats.
+
+### Who/What are most affected by these crimes?
+
+```{r Count of Crimes against every month}
+
+# Group by crime against and month
+top_crimes_against <-
+  crime_data %>% dplyr::select(crime_against, occurrence_month, offense_count) %>%
+  group_by(
+    CrimesAgainst = crime_against,
+    OccurenceMonths = format(crime_data$occurrence_date, "%B")
+  ) %>%  dplyr::summarize(Count = sum(offense_count))
+
+# Remove irrelavent crimes which are not so significant or explainable
+top_crimes_against <-
+  top_crimes_against[!(top_crimes_against$CrimesAgainst %in% c("NA", "Person/Not a Crime", "Not a Crime")),]
+
+# Create a grouped bar plot
+ggplot(data = top_crimes_against, aes(
+  x = factor(OccurenceMonths, levels = month.name),
+  y = Count,
+  fill = CrimesAgainst
+)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_text(
+    aes(label = Count),
+    vjust = 1.6,
+    color = "black",
+    position = position_dodge(0.9),
+    size = 2
+  ) +
+  labs(title = "Crimes Against By Month",
+       x = "Occurence Month", y = "Total Offense Counts") +
+  scale_fill_brewer(palette = "Paired") +
+  theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+* Crime against person and property have been steady increasing since March.
+* Societal crimes are on control.
+
+
+### Most unsafe streets in the worst beats
+
+```{r Most snsafe streets in the worst Beats }
+# Group by crime against and month
+
+top_streets_temp <-
+  crime_data %>% dplyr::select(beat, street_name, street_type, suffix, offense_count) %>% dplyr::filter(
+    as.character(beat) %in% c(
+      "17E10",
+      "14D20",
+      "15E40",
+      "22B20",
+      "19G10",
+      "1A10",
+      "17E40",
+      "12D10",
+      "1A20",
+      "7C20"
+    )
+  )
+
+top_streets <- 
+  top_streets_temp %>%  group_by(beat, Street = paste(street_name, street_type, replace(suffix, is.na(suffix), ""), sep = " ")) %>%  dplyr::summarize(Count = sum(offense_count)) %>% arrange(desc(Count)) %>% head(10)
+
+ggplot(top_streets, aes(
+  x = reorder(Street, Count),
+  y = Count,
+  fill = beat,
+  label = Count
+)) +
+  geom_bar(stat = "identity") +
+  geom_text(
+    vjust = 0.5,
+    color = "black",
+    position = position_stack(vjust = 0.9),
+    size = 3
+  ) +
+  labs(title = "Most Unsafe Streets in the Worst Beats",
+       x = "Street", y = "Total Offense Counts") +
+  scale_fill_brewer(palette = "Paired") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.6)) +
+  coord_flip() +
+  guides(fill = guide_legend(reverse = TRUE, title = "Beats"))
+
+
+```
+
+
+* Main Street which runs from 1A10 through 15E40 beats is the risky road to travel.
+* Greens Road in 22B20 has the highest number of incidents. 
+
+
+### Average crimes by beat month over month
+
+```{r Average crimes by beat month over month}
+
+top_beats_avg_temp <-
+  crime_data %>% dplyr::select(occurrence_date, beat, offense_count) %>% dplyr::filter(
+    as.character(beat) %in% c(
+      "17E10",
+      "14D20",
+      "15E40",
+      "22B20",
+      "19G10",
+      "1A10",
+      "17E40",
+      "12D10",
+      "1A20",
+      "7C20"
+    )
+  )
+
+# Group by month and offenses description
+top_beats_avg <- group_by(
+  top_beats_avg_temp,
+  OccurenceMonths = format(occurrence_date, "%B"),
+  Beats = beat
+) %>%  dplyr::summarize(Count = mean(offense_count)) %>% arrange(desc(Count))
+
+
+# Plot a line graph
+ggplot(data = top_beats_avg,
+       aes(
+         x = factor(OccurenceMonths, levels = month.name),
+         y = Count,
+         color = Beats,
+         group = Beats
+       )) +
+  geom_line(size = 1) +
+  geom_point() +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = "Average Crime by Beat Month over Month",
+       x = "Occurrence Months",
+       y = "Average Crime by Beat in Houston") +
+  guides(fill = guide_legend(reverse = TRUE, title = "Beats")) + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+* There had been a very huge spike in 7C20 beat incidents month over month since March.
+* Average offenses for 17E10 had a drastic uptick in crimes since Jan.
+* Most of the other beats had remained constant month over month.
+
+
+### Unique zip codes on a map
+
+```{r Unique zipcode on maps}
+
+bounds <- map('state', c('Texas'), fill=TRUE, plot=FALSE)
+icons <- awesomeIcons(
+    icon = 'disc',
+    iconColor = 'black',
+    library = 'ion', # Options are 'glyphicon', 'fa', 'ion'.
+    markerColor = 'blue',
+    squareMarker = TRUE
+)
+
+crime_data_map <- crime_data %>% dplyr::select(zip, latitude, longitude) %>% distinct
+
+maxLong = max(crime_data_map$longitude)
+maxLat = max(crime_data_map$latitude)
+minLong = min(crime_data_map$longitude)
+minLat = min(crime_data_map$latitude)
+
+# Create the Leaflet map widget and add some map layers.
+# We use the pipe operator %>% to streamline the adding of
+# layers to the leaflet object. The pipe operator comes from
+# the magrittr package via the dplyr package.
+leaflet(data = crime_data_map) %>%
+  setView(zoom = 100, lat = 29.10, lng = -95.10) %>%
+  addProviderTiles("CartoDB.Positron", group = "Map") %>%
+  addProviderTiles("Esri.WorldImagery", group = "Satellite") %>%
+  addProviderTiles("Esri.WorldShadedRelief", group = "Relief") %>%
+  # Marker data are from the sites data frame. We need the ~ symbols
+  # to indicate the columns of the data frame.
+  addMarkers(
+    ~ longitude,
+    ~ latitude,
+    label = ~ zip,
+    group = "Sites",
+    icon = icons
+  ) %>%
+  addPolygons(
+    data = bounds,
+    group = "States",
+    weight = 2,
+    fillOpacity = 0
+  ) %>%
+  addScaleBar(position = "bottomleft") %>%
+  addLayersControl(
+    baseGroups = c("Map", "Satellite", "Relief"),
+    overlayGroups = c("Sites", "States"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>% fitBounds(minLong, minLat, maxLong, maxLat)
+
+
+```
+
+* Mapping the zip codes on a Map informs few interesting things about data. There are offenses in the data set which with have happened outside of the HPD jurisdiction or may be an error in the entry of the data. Zip code 78728 is very close to Austin, TX and has an entry in the data set under 8C10 beat. 
+* Same could be the case with Zip code 77541 which seems to be too far away from Houston. 
+
+
+### Heatmap of offenses in Houston
+
+```{r Heat Map by Zipcode}
+# Group by zipcode and sum of offense counts
+heatmap.by.zipcode <-
+  crime_data %>% dplyr::select(zip, latitude, longitude,offense_count) %>%
+  group_by(
+    zip,
+    latitude, 
+    longitude
+  ) %>%  dplyr::summarize(Count = sum(offense_count)) %>%
+  arrange(desc(Count))
+
+# add a dark matter map and display the intensity
+leaflet(quakes) %>% addProviderTiles(providers$CartoDB.DarkMatter) %>%
+  setView(zoom = 9.5, lat = 29.79, lng = -95.35) %>%
+  addHeatmap(
+    lng = ~ heatmap.by.zipcode$longitude,
+    lat = ~ heatmap.by.zipcode$latitude,
+    intensity = ~ mag,
+    blur = 20,
+    max = 0.05,
+    radius = 15
+  ) 
+
+```
+
+* Highest intensity of crimes happening in the city center of Houston.
+
+
+### Crimes and zipcodes on map
+
+**NOTE:** Hover over the circles to see the zipcode and count of offenses in that zipcode
+
+```{r Crimes and Zipcodes}
+# Group by zipcode
+crimes.by.zipcode <-
+  crime_data %>% dplyr::select(zip, latitude, longitude, offense_count) %>%
+  group_by(zip,
+           latitude,
+           longitude) %>%  dplyr::summarize(Count = sum(offense_count)) %>%
+  arrange(desc(Count))
+
+# Set color scheme
+color_scheme <-
+  viridis::cividis(n_distinct(crimes.by.zipcode$zip))
+pal = colorFactor(color_scheme, crimes.by.zipcode$zip)
+
+# Plot data on a map
+crimes.by.zipcode %>%
+  leaflet() %>%
+  setView(zoom = 10.5,
+          lat = 29.79,
+          lng = -95.35) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addCircleMarkers(
+    ~ as.numeric(longitude),
+    ~ as.numeric(latitude),
+    weight = 1,
+    radius = ~ sqrt(Count) * 0.7,
+    label = ~htmlEscape(paste(
+      paste("Zip = ", as.character(zip), sep = " "),
+      paste("Count = ", as.character(Count), sep = " "),
+      sep = ", "
+    ))) %>% 
+  addHeatmap(
+    lng =  ~ as.numeric(longitude),
+    lat =  ~ as.numeric(latitude),
+    blur = 20,
+    max = 0.05,
+    radius = 15
+  )
+
+
+```
+
+* Zip code 77004 at the heart of the city is the most unsafe zip code. 
+* Higher the population more the number of offenses is clearly noticeable from this map as there are fewer crimes in the Houston suburbs compared to city center. 
+

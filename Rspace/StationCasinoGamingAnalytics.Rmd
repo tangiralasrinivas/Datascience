@@ -1,0 +1,556 @@
+---
+title: 'Station Casino: Gaming Analytics'
+author: "Krishna Prasad"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  word_document: default
+  html_document:
+    highlight: pygment
+    theme: united
+    toc: yes
+    css: style.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, dpi=100)
+```
+
+
+```{r Check Package Install, echo=FALSE}
+
+# Function to Install and Load R Packages
+install.load.packages <- function(required.packages)
+{
+    required.packages <- required.packages[!(required.packages %in% installed.packages()[,"Package"])];
+
+    if(length(required.packages))
+    {
+        install.packages(required.packages, repos = 'http://cran.us.r-project.org');
+    }
+    for(package.name in required.packages)
+    {
+        library(package.name,character.only=TRUE,quietly=TRUE);
+    }
+}
+
+# Specify the list of required packages to be installed and load
+required.packages = c("tidyverse",
+                      "ggplot2",
+                      "cowplot",
+                      "utils",
+                      "RColorBrewer",
+                      "factoextra",
+                      "ggpubr")
+
+# Call the Function
+for (package in required.packages) {
+  install.load.packages(package)
+}
+
+
+```
+
+```{r Import Data, echo=FALSE}
+
+library(tidyverse)
+library(ggplot2)
+library(utils)
+library(cowplot)
+library(RColorBrewer)
+library(factoextra)
+library(ggpubr)
+
+```
+
+---
+
+# Introduction
+
+\  
+
+  Station Casinos is the leading provider of gaming and entertainment to the local residents of Las Vegas, Nevada. As the largest non-union gaming company in the country, Station Casinos owns and operates 18 casino and/or hotel properties in the Las Vegas area.  Founded by Frank Fertitta Jr. in 1976, the first property was opened as ‘The Casino’, home of the famous Bingo Parlor (later to become Palace Station). The business model was to cater to local residents operating from less expensive real estate on the periphery of town, rather than competing for tourist dollars on the expensive ‘Strip’ of Las Vegas Boulevard. 
+
+\  
+
+<center>
+![Las Vegas Boulevard](VegasMap.png)
+</center>
+
+
+Today, they continue to serve the Las Vegas locals. Station Casinos earned the loyalty of their customers by consistently delivering a friendly and fair gaming experience. Part of Station Casinos’ popularity with the locals, a group very sophisticated in gaming, comes from their policy to maintain, on average, a lower hold, or house win percentage, than other casinos. In other words, the casino keeps less of the money played, allowing for longer play time for customers. 
+
+
+# Problem
+
+Using the complete data provided (5000 players in one day), we will answer few critical questions for the Station Casino management. With our background understanding on the problem, we will first analyse the amounts bet on all the games and number of people who played different games. With these insights we will create groupings that will assist management to determine what type of comps need to be offered.  
+
+
+```{r Initialize and Read Data, echo=TRUE}
+
+casino.data.file <- paste("./", "Casino.csv", sep = "")
+
+# Read the casino.xlsx file into a data frame
+casino <-
+  read_csv(casino.data.file,
+                     col_names = TRUE,
+                     trim_ws = TRUE)
+
+```
+
+Below is the snapshot of the data provided
+
+
+```{r Data Snapshot, echo=TRUE}
+glimpse(casino)
+```
+
+\  
+
+\pagebreak
+
+### How much total dollars were played on each game? 
+
+
+```{r Summarize bets, echo=TRUE,warning=FALSE, message=FALSE}
+
+# Total spend on all games
+TotalSpend <- as.integer(sum(casino$`Total Spend`))
+
+# Create data frame to save the totals of all the games played
+bets <-
+  data_frame(
+    games.played = c("Slots", "BJ", "Craps", "Bac", "Bingo", "Poker", "Other"),
+    total.bets = c(
+      sum(casino$Slots, na.rm = TRUE),
+      sum(casino$BJ, na.rm = TRUE),
+      sum(casino$Craps, na.rm = TRUE),
+      sum(casino$Bac, na.rm = TRUE),
+      sum(casino$Bingo, na.rm = TRUE),
+      sum(casino$Poker, na.rm = TRUE),
+      sum(casino$Other, na.rm = TRUE)
+    )
+  )
+
+
+# Plot Graph
+ggplot(bets, aes(x = reorder(games.played, -total.bets),
+                 y = total.bets)) +
+  geom_bar(stat = "identity",
+           fill = "steelblue",
+           col = "black") +
+  geom_text(label = bets$total.bets,
+            vjust = 1.3,
+            color = "white",
+            size = 3) +
+  xlab("Games Played") +
+  ylab("Total Bet ($)") +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Total Amount Played By Game")
+  
+```
+
+\  
+
+**Analysis:**
+
+* The total amount spent on all the games: **$`r prettyNum(TotalSpend, big.mark=",", scientific=FALSE)`**
+* **Slots**, **BJs** and **Craps** are top games where most of the money was spent by customers.
+* Customers spent **$`r prettyNum(bets$total.bets[1], big.mark=",", scientific=FALSE)`** which is **`r toString(round((bets$total.bets[1]*100)/TotalSpend, 0))`%** of the total amount on *Slots*.
+* Customers spent **$`r prettyNum(bets$total.bets[2], big.mark=",", scientific=FALSE)`** which is **`r toString(round((bets$total.bets[2]*100)/TotalSpend, 0))`%** of the total amount on *BJs*.
+* Customers spent **$`r prettyNum(bets$total.bets[3], big.mark=",", scientific=FALSE)`** which is **`r toString(round((bets$total.bets[3]*100)/TotalSpend, 0))`%** of the total amount on *Craps*.
+* Customers spent **$`r prettyNum(bets$total.bets[4], big.mark=",", scientific=FALSE)`** which is **`r toString(round((bets$total.bets[4]*100)/TotalSpend, 0))`%** of the total amount on *Bac*.
+* Customers spent **$`r prettyNum(bets$total.bets[5], big.mark=",", scientific=FALSE)`** which is **`r toString(round((bets$total.bets[5]*100)/TotalSpend, 0))`%** of the total amount on *Bingo*.
+* Customers spent **$`r prettyNum(bets$total.bets[6], big.mark=",", scientific=FALSE)`** which is **`r toString(round((bets$total.bets[6]*100)/TotalSpend, 0))`%** of the total amount on *Poker*.
+* Customers spent **$`r prettyNum(bets$total.bets[7], big.mark=",", scientific=FALSE)`** which is **`r toString(round((bets$total.bets[7]*100)/TotalSpend, 0))`%** of the total amount on *Other*.
+
+
+\pagebreak
+
+### How many people played each of the seven games and how much did they wager?
+
+**Analysis:**
+
+One easy way to analyse how many people played,  how much each wagered and segment them based on their spend levels is by plotting histograms for each game. 
+
+Below are the histograms showing the number of players and the amount spent for each game with the red line being the average amount spent for each game.
+
+\  
+
+```{r Slots bar graph, echo=TRUE}
+# subset cas daat set for slots
+slt <- as.data.frame(casino[2])
+
+# Create Range data frame
+slt$range <-
+  as.factor(findInterval(slt$Slots, c(0, 500, 1000, 2000), rightmost.closed = TRUE))
+
+# Create plot
+slots.plot <- ggplot(slt, aes(x = slt$Slots)) +
+  geom_histogram(
+    aes(fill = slt$range),
+    bins = 10,
+    binwidth = 150,
+    color = "black"
+  ) +
+  ggtitle("Slots") +
+  geom_vline(
+    aes(xintercept = mean(slt$Slots)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  ylab("Player Count") +
+  xlab("Total Bet ($)") +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      hjust = 0.5,
+      lineheight = 10
+    ),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(fill = "category") +
+  scale_fill_discrete(name = "Amount Bet",
+                      labels = c("< 500", " >= 500 but < 1000", ">= 1000"))
+
+slots.plot
+
+```
+
+
+**Slots:** On an average, players spent ~$275 on Slot machines with majority of the players spending $200 or less. There are moderate number of players who spent more than $250 on slot machines.
+
+\  
+
+```{r Bjs bar graph, echo=TRUE}
+
+# subset cas daat set for slots
+bj <- as.data.frame(casino[3])
+# add range variable to data frame
+bj$range <-
+  as.factor(findInterval(bj$BJ, c(0, 1000, 5000, 8000), rightmost.closed = TRUE))
+# plot graph
+bjs.plot <- ggplot(bj, aes(x = bj$BJ)) +
+  geom_histogram(
+    aes(fill = bj$range),
+    bins = 10,
+    binwidth = 1000,
+    color = "black"
+  ) +
+  geom_vline(
+    aes(xintercept = mean(bj$BJ)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  ggtitle("Black Jack") +
+  ylab("Player Count") +
+  xlab("Total Bet ($)") +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      hjust = 0.5,
+      lineheight = 10
+    ),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(fill = "category") +
+  #scale_x_continuous(limits = c(0,))+
+  scale_y_continuous(limits = c(0, 100)) +
+  scale_fill_discrete(name = "Amount Bet",
+                      labels = c("< 1000", ">= 1000 but < 5000", ">= 5000"))
+bjs.plot
+
+
+```
+
+**Black Jack:** On an average, players spent ~$280 on Blackjack with majority of the players spending $500 or less. A fraction of players spent over $1000 on Black Jack. 
+
+
+\  
+
+```{r Craps bar graph, echo=TRUE}
+# subset cas daat set for slots
+craps <- as.data.frame(casino[4])
+
+# add range variable to data frame
+craps$range <-
+  as.factor(findInterval(craps$Craps, c(0, 1000, 5000, 8000), rightmost.closed = TRUE))
+
+# plot graph
+craps.plot <- ggplot(craps, aes(x = craps$Craps)) +
+  geom_histogram(
+    aes(fill = craps$range),
+    bins = 10,
+    binwidth = 750,
+    color = "black"
+  ) +
+  geom_vline(
+    aes(xintercept = mean(craps$Craps)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  ggtitle("Craps") +
+  ylab("Player Count") +
+  xlab("Total Bet ($)") +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      hjust = 0.5,
+      lineheight = 10
+    ),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(fill = "category") +
+  scale_y_continuous(limits = c(0, 100)) +
+  scale_fill_discrete(name = "Amount Bet",
+                      labels = c("< 1000", ">= 1000 but < 5000", ">= 5000"))
+
+craps.plot
+
+
+```
+
+
+**Craps:** On an average, players spent ~$260 on Craps with majority of the players spending $500 or less. A moderate number of players spent $1000 or more on Craps. 
+
+\  
+
+```{r Bacs bar graph, echo=TRUE}
+
+bac <- as.data.frame(casino[5])
+
+# add range variable to data frame
+bac$range <-
+  as.factor(findInterval(bac$Bac, c(0, 500, 1000, 3000), rightmost.closed = TRUE))
+
+# plot graph
+bacs.plot <- ggplot(bac, aes(x = bac$Bac)) +
+  geom_histogram(
+    aes(fill = bac$range),
+    bins = 10,
+    binwidth = 200,
+    color = "black"
+  ) +
+  geom_vline(
+    aes(xintercept = mean(craps$Craps)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  ggtitle("Baccarats") +
+  ylab("Player Count") +
+  xlab("Total Bet ($)") +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      hjust = 0.5,
+      lineheight = 10
+    ),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(fill = "category") +
+  scale_y_continuous(limits = c(0, 100)) +
+  scale_fill_discrete(name = "Amount Bet",
+                      labels = c("< 500", ">= 500 but < 1000", ">= 1000"))
+
+bacs.plot
+
+
+```
+
+
+**Baccarat:** On an average, players spent ~$80 on Baccarats with majority of the players spending $150 or more 
+
+\  
+
+```{r Bingo bar graph, echo=TRUE}
+
+bingo <- as.data.frame(casino[6])
+
+# add range variable to data frame
+bingo$range <-
+  as.factor(findInterval(bingo$Bingo, c(0, 50, 100, 250), rightmost.closed = TRUE))
+
+# plot graph
+bingo.plot <- ggplot(bingo, aes(x = bingo$Bingo)) +
+  geom_histogram(
+    aes(fill = bingo$range),
+    bins = 10,
+    binwidth = 10,
+    color = "black"
+  ) +
+  geom_vline(
+    aes(xintercept = mean(bingo$Bingo)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  ggtitle("Bingo") +
+  ylab("Player Count") +
+  xlab("Total Bet ($)") +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      hjust = 0.5,
+      lineheight = 10
+    ),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(fill = "category") +
+  scale_y_continuous(limits = c(0, 80)) +
+  scale_fill_discrete(name = "Amount Bet",
+                      labels = c("< 500", ">= 500 but < 1000", ">= 1000"))
+
+bingo.plot
+
+```
+
+
+**Bingo:** On an average, players spent ~$10 on Bingo with majority of the players spending anywhere between $25-$200. There are very few players who have spent above or below the $25-$200 range.
+
+\  
+
+```{r Poker bar graph, echo=TRUE}
+
+poker <- as.data.frame(casino[7])
+
+# add range variable to data frame
+poker$range <-
+  as.factor(findInterval(poker$Poker, c(0, 250, 500, 1000), rightmost.closed = TRUE))
+
+# plot graph
+poker.plot <- ggplot(poker, aes(x = poker$Poker)) +
+  geom_histogram(
+    aes(fill = poker$range),
+    bins = 10,
+    binwidth = 30,
+    color = "black"
+  ) +
+  geom_vline(
+    aes(xintercept = mean(poker$Poker)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  ggtitle("Poker") +
+  ylab("Player Count") +
+  xlab("Total Bet ($)") +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      hjust = 0.5,
+      lineheight = 10
+    ),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(fill = "category") +
+  scale_y_continuous(limits = c(0, 200)) +
+  scale_fill_discrete(name = "Amount Bet",
+                      labels = c("< 250", ">= 250 but < 500", ">= 500"))
+
+poker.plot
+
+```
+
+
+**Poker:** On an average, players spent ~$55 on Poker with majority of the players spending less than $250. There are very few players who have spent money more than $300.
+
+\  
+
+```{r Other games bar graph, echo=TRUE}
+other <- as.data.frame(casino[8])
+# add range variable to data frame
+other$range <-
+  as.factor(findInterval(other$Other, c(0, 250, 500, 1050), rightmost.closed = TRUE))
+# plot graph
+other.plot <- ggplot(other, aes(x = other$Other)) +
+  geom_histogram(
+    aes(fill = other$range),
+    bins = 10,
+    binwidth = 40,
+    color = "black"
+  ) +
+  geom_vline(
+    aes(xintercept = mean(other$Other)),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  ggtitle("Other Games") +
+  ylab("Player Count") +
+  xlab("Total Bet ($)") +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      hjust = 0.5,
+      lineheight = 10
+    ),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(fill = "category") +
+  scale_y_continuous(limits = c(0, 150)) +
+  scale_fill_discrete(name = "Amount Bet",
+                      labels = c("< 250", ">= 250 but < 500", ">= 500"))
+
+other.plot
+
+```
+
+
+**Other Games:** On an average, players spent ~$130 on Other games with players equally distributed on the spend. There are  fair amount of players who have spent money between the $250-$900 range playing these kind of games.
+
+\  
+
+```{r All bar graphs, echo=TRUE, message=FALSE, warning=FALSE}
+
+# Combine Plot
+ggarrange(slots.plot, bjs.plot, craps.plot, bacs.plot, bingo.plot, poker.plot, other.plot, ncol=1, nrow=2, font.label = list(size = 2))
+
+```
+
+
+\pagebreak
+
+### What type of comps should be offered to players in each grouping?
+
+Use a K-Means Cluster Analysis to create the groupings that will help management to determine what type (and value) of comps should be offered to players in each grouping. Keep the number of groups in the 3-6 range (K=3 to 6). Show the K=6 results as a Scatter plot Matrix showing every combination of two games (i.e. use the pairs function from the cars package)
+
+
+```{r K-Means Clustering, echo=TRUE, message=FALSE, warning=FALSE}
+
+# set the color palette
+palette(brewer.pal(8, "Paired"))
+
+# set the random number generator seed
+set.seed(0)
+
+data <- casino[,-1]
+
+# change game total to percentage
+for (var in 1:7) {
+    data[[var]] <- data[[var]] / data[["Total Spend"]]
+}
+
+# scale each variable to have standard deviation = 1
+sdata <- scale(data)
+
+# fit kmeans with 6 clusters and 1000 random initializations
+km <- kmeans(sdata, 6, nstart = 1000)
+
+# produce a pairs scatterplot; use assigned cluster for the color
+pairs(data, col = km$cluster)
+
+```
+
+
+```{r Fviz Visual, echo=TRUE, message=FALSE, warning=FALSE}
+# Visual Illustration of the cluster
+fviz_cluster(km, data = data)
+```
+
+\  
+
+Overall, with the above analysis it is clear that Station Casino is loosing money with Bingo game in-house. It brought in only $50,432 of money played with fairly low number of customer playing Bingo. However it is important to note that Bingo was the first game to be introduced in Station Casino and a very famous service to the locals and removing the game decrease their brand affinity with the locals. With a conservative approach, Station Casino may have to reduce the square footage for Bingo game and redistribute that area to the most profitable games like Slots, Black Jack and Craps. I would recommend Station Casino to keep the Bingo game and retain the Brand name.

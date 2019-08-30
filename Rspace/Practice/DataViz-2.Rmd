@@ -1,0 +1,57 @@
+---
+title: "Assignment-6"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library}
+library("readr") # Loads the readr package
+```
+
+```{r readcsv}
+undergrad <- data.frame(read_csv("mydata/undergrad.csv")) # Load file data into dataframe
+```
+
+
+```{r rename}
+#renaming columns in the undergrad data frame
+names(undergrad) <- c("timestamp","excel","access", "statistics", "programming", "iscourse", "cscourse", "topics", "istopics", "onlinecourse", "concentration")
+```
+
+```{r attach}
+#attach undergrad dataframe
+attach(undergrad)
+```
+
+```{r excel_order}
+#Order excel variable
+excel
+excel_ordered <- ordered(x=excel, levels=c("Somewhat agree","Agree","Strongly Agree"))
+```
+
+```{r statistics_order}
+#Order statistics variable
+
+statistics_ordered <- ordered(x=statistics, levels=c("Disagree","Neither agree or disagree","Somewhat agree","Agree","Strongly Agree"))
+```
+
+
+```{r programming_order}
+#Order programming variable
+programming_ordered <- ordered(x=programming, levels=c("Disagree","Somewhat disagree","Neither agree or disagree","Somewhat agree","Agree","Strongly Agree"))
+```
+
+```{r hist}
+#Create histogram for all the ordered variables
+par(mfrow = c(1, 3))
+
+hist(as.numeric(excel_ordered),breaks=2, main = "Excel", xlab = "Bins by reponse category", col="#4cbea3", labels=TRUE, border="#FFFFFF")
+
+hist(as.numeric(statistics_ordered),breaks=5, main = "Statistics", xlab = "Bins by reponse category", col="#4cbea3", labels=TRUE, border="#FFFFFF")
+
+hist(as.numeric(programming_ordered),breaks=6, main = "Programming", xlab = "Bins by reponse category", col="#4cbea3", labels=TRUE, border="#FFFFFF")
+```
+
