@@ -2,6 +2,7 @@
 
 Python Scripts:
 
+* Python Basics and Pandas
 * Sentiment Analysis using IBM Watson API
 
 R Scripts:
