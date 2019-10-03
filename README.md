@@ -8,7 +8,9 @@ Python Scripts:
 R Scripts:
 
 * Basic R Scripts for Practice
-* Houston Police Department Crime Data Analysis
-* Houston Police Department Resource Allocation predictions
+* Houston Police Department Crime Data Analysis and Resource Allocation predictions
 * Fraud Detection using Performance Estimation Package
 * Stock Market Predictions using Performance Estimation Packages
+* Stock Closing Price Predictions using Quantmod and Performance Estimation Packages
+* Station Casino K-Means Cluster Analysis
+* Text Mining using quanteda and Performance Estimation Packages
