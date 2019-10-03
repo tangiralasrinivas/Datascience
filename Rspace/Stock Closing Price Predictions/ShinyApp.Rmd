@@ -1,0 +1,286 @@
+---
+title: "Stock Price Predictions Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    social: menu
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+
+# Function to Install and Load R Packages
+install.load.packages <- function(required.packages)
+{
+  required.packages <-
+    required.packages[!(required.packages %in% installed.packages()[, "Package"])]
+  
+  
+  if (length(required.packages))
+  {
+    install.packages(required.packages, repos = 'http://cran.us.r-project.org');
+  }
+  for (package.name in required.packages)
+  {
+    library(package.name,
+            character.only = TRUE,
+            quietly = TRUE)
+    
+  }
+}
+
+# Specify the list of required packages to be installed and load
+required.packages <- c(
+  "flexdashboard",
+  "quantmod",
+  "rpart",
+  "nlme",
+  "xts",
+  "DMwR",
+  "TTR",
+  "nnet",
+  "randomForest",
+  "gridExtra",
+  "openxlsx",
+  "bizdays",
+  "shiny",
+  "DT"
+)
+
+
+# Call the Function
+install.load.packages(required.packages)
+
+library(flexdashboard)
+library(quantmod) 
+library(rpart) 
+library(nlme)
+library(xts)
+library(DMwR)
+library(TTR)
+library(nnet)
+library(randomForest)
+library(gridExtra)
+library(openxlsx)
+library(shiny)
+library(DT)
+
+```
+
+```{r, include=FALSE}
+
+# Aux functions used to obtain predictors
+myATR   <- function(x) ATR(HLC(x))[,'atr']
+myADX   <- function(x) ADX(HLC(x))[,'ADX']
+myEMV   <- function(x) EMV(cbind(Hi(x),Lo(x)),Vo(x))[,2]
+myMACD  <- function(x) MACD(Cl(x))[,2]
+mySAR   <- function(x) SAR(cbind(Hi(x),Cl(x))) [,1]
+myVolat <- function(x) volatility(OHLC(x),calc="garman")[,1]
+
+assign("myATR", myATR, envir = .GlobalEnv)
+assign("myADX", myADX, envir = .GlobalEnv)
+assign("myEMV", myEMV, envir = .GlobalEnv)
+assign("myMACD", myMACD, envir = .GlobalEnv)
+assign("mySAR", mySAR, envir = .GlobalEnv)
+assign("myVolat", myVolat, envir = .GlobalEnv)
+
+#Obtain prediction model for a given iteration
+GetPredModel <- function(i, stockName){
+  formula <- as.formula(paste0("Next(Cl(",stockName,")",",",i,") ~
+                                Delt(Cl(",stockName,"),k=1)+
+                                myATR(",stockName,")+
+                                myADX(",stockName,")+
+                                myEMV(",stockName,")+
+                                myVolat(",stockName,")+
+                                myMACD(",stockName,")+
+                                mySAR(",stockName,")+
+                                runMean(Cl(",stockName,"))"))
+  m <- specifyModel(formula)
+  data <- as.data.frame(modelData(m))
+  return(data)
+} 
+
+```
+
+
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+
+# Select dropdowns in the side bar
+selectInput('ticker', 'Select a Stock', c("Pfizer - PFE", 
+                                          "Goldman Sachs - GS", 
+                                          "General Motors - GM", 
+                                          "Apple - AAPL", 
+                                          "Amazon - AMZN"))
+
+selectInput('modelID', 'Select a Predictive Model', c("ANN", 
+                                                      "RandomForest",
+                                                      "Rpart"))
+
+```
+
+
+row {data-height=650}
+-----------------------------------------------------------------------
+
+### Stock Price & Volume Movement Chart (past 180 days) 
+
+```{r}
+# Select ticker based on user selection 
+stock.ticker <- reactive({
+  if (input$ticker == "Goldman Sachs - GS") {
+    ticker = "GS"
+  } else if (input$ticker == "General Motors - GM") {
+    ticker = "GM"
+  } else if (input$ticker == "Pfizer - PFE") {
+    ticker = "PFE"
+  } else if (input$ticker == "Apple - AAPL") {
+    ticker = "AAPL"
+  } else {
+    ticker = "AMZN"
+  }
+  ticker
+})
+```
+
+
+```{r}
+
+# Render candle chart based on the ticker
+
+renderPlot({
+  
+  stockName = stock.ticker()
+  modelID = input$modelID
+  
+  # end date and start dates based on system time
+  endDate = as.Date(Sys.Date() - 1, format = "%Y-%M-%D")
+  startDate = as.Date(endDate - 180, format = "%Y-%M-%D")
+  
+  # Plot the actual stock price
+  chartData <-
+    getSymbols(
+      stockName,
+      src = "yahoo",
+      from = startDate,
+      to = endDate,
+      auto.assign = FALSE
+    )
+  chartSeries(
+    chartData,
+    name = input$ticker,
+    subset = paste(endDate - 180, endDate, sep = "/"),
+    type = 'line',
+    theme = 'white'
+  )
+  
+})
+
+```
+
+Row {data-height=450}
+-------------------------------------
+
+### Stock Price Predictions (next 5 trading days) based on choice of predictive model 
+
+```{r}
+
+# Calculate forecast and plot forecast
+renderPlot({
+  
+  stockName = stock.ticker()
+  modelID = input$modelID
+  
+  if (input$modelID == "Rpart") {
+    modelID = 1
+  } else if (input$modelID == "RandomForest") {
+    modelID = 2
+  } else {
+    modelID = 3
+  }
+  
+  # End date and start dates based on system time
+  endDate = as.Date(Sys.Date() - 1, format = "%Y-%M-%D")
+  startDate = as.Date(endDate - 180, format = "%Y-%M-%D")
+  
+  # Derive max data available
+  maxdate <-
+    max(index(getSymbols(stockName, auto.assign = FALSE)))
+  
+  # Define prediction as xts object
+  prediction <- xts()
+  n = 1
+  while (n <= 5) {
+    data <- GetPredModel(n, stockName)
+    formula <-
+      as.formula(paste0("Next.Cl.", stockName, ".", n, " ~ ."))
+    set.seed(1234)
+    
+    # Pick model
+    if (modelID == 1) {
+      res <- rpart(formula, data, parms = list(prior = c(.65,.35), split = "information"))
+    } else if (modelID == 2) {
+      res <- randomForest(formula, data, na.action = na.omit, ntree = 50)
+    } else if (modelID == 3) {
+      res <-
+        nnet(
+          formula,
+          data,
+          size = 10,
+          decay = 0.01,
+          maxit = 1000,
+          linout = T,
+          trace = F
+        )
+    }
+    
+    pred_date <- as.Date(maxdate) + n
+    p <- predict(res, data[as.character(maxdate),])
+    if (modelID == 3) {
+      p <- p[, 1]
+    }
+    
+    #print(pred_date)
+    names(p) <- c(as.character(pred_date))
+    prediction <- rbind(as.xts(cbind(p)), prediction)
+    n = n + 1
+  }
+  data.preds <- reactive({
+    as.data.frame(data)
+  }) 
+  plot(prediction)
+  
+})
+
+```
+
+### Summary Table | Best Performing Models
+
+QuantMod package has been used extensively for getting the tickers, specifying the model and building the model. Evaluated models based on performance estimations for each stock. Based on the average theil metric, we have predicted the closing stock price for each ticker for the next 5 days. Below is a table explaining the best model for each metric and their average MSE, MAE and THIEL for the selected stock ticker based on the top performance metrics:
+
+```{r}
+# Show table with metrics in the summary section 
+renderTable({
+  t.data <- read.xlsx("./ticker_data.xlsx")
+  t.data <- as.data.frame(t.data)
+  
+  if (input$ticker == "Goldman Sachs - GS") {
+    df <- t.data[1,3:8]
+  } else if (input$ticker == "General Motors - GM") {
+    df <- t.data[2,3:8]
+  } else if (input$ticker == "Pfizer - PFE") {
+    df <- t.data[3,3:8]
+  } else if (input$ticker == "Apple - AAPL") {
+    df <- t.data[4,3:8]
+  } else {
+    df <- t.data[5,3:8]
+  }
+  df
+  
+})
+
+```
+

@@ -1,0 +1,237 @@
+---
+title: "Predictive Models for Stock of Choice"
+author: "Anubhav Rustogi"
+date: "9/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r intstallpackages, include=TRUE, echo=TRUE, warning=FALSE, message=FALSE}
+
+# Function to Install and Load R Packages
+install.load.packages <- function(required.packages)
+{
+  required.packages <-
+    required.packages[!(required.packages %in% installed.packages()[, "Package"])]
+  
+  
+  if (length(required.packages))
+  {
+    install.packages(required.packages, repos = 'http://cran.us.r-project.org');
+  }
+  for (package.name in required.packages)
+  {
+    library(package.name,
+            character.only = TRUE,
+            quietly = TRUE)
+    
+  }
+}
+
+# Specify the list of required packages to be installed and load
+required.packages <- c(
+  "openxlsx",
+  "tidyverse",
+  "quantmod",
+  "performanceEstimation",
+  "e1071",
+  "DMwR2",
+  "randomForest",
+  "xts",
+  "TTR",
+  "rpart",
+  "bizdays",
+  "mda",
+  "nnet"
+)
+
+
+# Call the Function
+install.load.packages(required.packages)
+
+# load required libraries
+library(openxlsx)
+library(tidyverse)
+library(quantmod)
+library(performanceEstimation)
+library(mda)
+library(dplyr)
+library(DMwR2)
+library(randomForest)
+library(xts)
+library(TTR)
+library(FinancialInstrument)
+library(rpart)
+library(bizdays)
+library(nnet)
+
+```
+
+
+```{r getstockprices, include=TRUE, echo=FALSE, warning=FALSE,message=FALSE}
+
+# ticker <- c("AAPL", "GM", "AMZN", "PFE", "GS")
+get.ticker <- function(ticker) {
+  print(ticker)
+  return(
+    getSymbols(
+      ticker,
+      src =  "yahoo",
+      from = '2010-01-01',
+      auto.assign = FALSE
+    )
+  )
+}
+
+```
+
+```{r candlechart, include=TRUE, echo=FALSE, warning=FALSE,message=FALSE}
+
+# Display a candlechart function based on the stock ticker
+candle.chart <- function(ticker, stock.name) {
+  candleChart(Cl(ticker), name = stock.name)
+}
+
+```
+
+
+```{r auxfunctions,include=TRUE, echo=FALSE, warning=FALSE, message= FALSE }
+
+# Aux functions used to obtain predictors
+
+myATR <- function(x) ATR(HLC(x))[,'atr']
+mySMI <- function(x) SMI(HLC(x))[, "SMI"]
+myADX <- function(x) ADX(HLC(x))[,'ADX']
+myAroon <- function(x) aroon(cbind(Hi(x),Lo(x)))$oscillator
+myEMV <- function(x) EMV(cbind(Hi(x),Lo(x)),Vo(x))[,2]
+myMACD <- function(x) MACD(Cl(x))[,2]
+myMFI <- function(x) MFI(HLC(x), Vo(x))
+mySAR <- function(x) SAR(cbind(Hi(x),Cl(x))) [,1]
+myVolat <- function(x) volatility(OHLC(x), calc = "garman")[,1]
+
+```
+
+
+```{r Model,include=TRUE, echo=FALSE, warning=FALSE,message=FALSE}
+
+# Run Performance Estimation tasks to compare the model performace 
+
+run.estimation <- function(ticker.data, stock.name) {
+  cl.func <- 'Cl'
+  tic.dat <- 'ticker.data'
+  f <-
+    as.formula(paste(paste(cl.func, tic.dat, sep = '.'), '.', sep = '~'))
+  print(f)
+  
+  model <- performanceEstimation(
+    PredTask(f, train.data, stock.name),
+    c(
+      Workflow(
+        'standardWF',
+        wfID = "randomforest",
+        learner = 'randomForest',
+        learner.pars = list(ntree = 500)
+      ),
+      Workflow(
+        'standardWF',
+        wfID = "rpart",
+        learner = 'rpart',
+        learner.pars = list(
+          method = "class",
+          parms = list(split = "information"),
+          control = rpart.control(
+            minsplit = 20,
+            cp = 0.01,
+            usesurrogate = 0,
+            maxsurrogate = 0
+          )
+        )
+      ),
+      Workflow(
+        'standardWF',
+        wfID = "ann",
+        learner = 'nnet',
+        learner.pars = list(
+          size = 10,
+          decay = 0.01,
+          maxit = 1000,
+          linout = T,
+          trace = F
+        )
+      )
+    ),
+    EstimationTask(
+      metrics = c("mae", "mse", "theil"),
+      method = MonteCarlo(
+        nReps = 5,
+        szTrain = 0.5,
+        szTest = 0.25
+      )
+    )
+  )
+  return(model)
+}
+
+```
+
+```{r Call Functions, warning=FALSE,message=FALSE, echo=TRUE, include=TRUE}
+
+# Input for ticker name and name of the stock, name will be auto generated based on the ticker
+
+data <-
+  data.frame(
+    ticker = c("GS", "GM", "PFE", "AAPL", "AMZN"),
+    name = c("Goldman Sachs","General Motors","Pfizer","Apple","Amazon"),
+    modelmae = NA,
+    modelmse = NA,
+    modeltheil = NA,
+    metricmae = NA,
+    metricmse = NA,
+    metrictheil = NA
+  )
+
+for (item in 1:nrow(data))
+{
+ticker <- as.character(data$ticker[item])
+name <- as.character(data$name[item])
+  
+  # Get the ticker as an Xts object
+  ticker.data <- get.ticker(ticker)
+  
+  
+  # Visualize Candle Chart for the ticker
+  #candle.chart(ticker.data, name)
+  
+  # Create the data model as a quantmod object to feed into the learner
+  data.model <-
+    specifyModel(
+      Cl(ticker.data) ~ Next(Lag(Cl(ticker.data),k=0:3)) + myATR(ticker.data)  + myEMV(ticker.data) + mySAR(ticker.data) + runMean(Cl(ticker.data)) + runSD(Cl(ticker.data))
+    )
+  
+  # Spilt data into train and test sets
+  train.data <- as.data.frame(modelData(data.model,
+                                        data.window = c('2010-01-01', '2018-12-31')))
+  
+  # Run Model
+  model <- run.estimation(ticker.data, name)
+  
+  #plot(model)
+  summary(model)
+
+  data$modelmae[as.character(data$name) == name] <- as.data.frame(topPerformers(model))[1, 1]
+  data$metricmae[as.character(data$name) == name] <- as.data.frame(topPerformers(model))[1, 2]
+  data$modelmse[as.character(data$name) == name] <- as.data.frame(topPerformers(model))[2, 1]
+  data$metricmse[as.character(data$name) == name] <- as.data.frame(topPerformers(model))[2, 2]
+  data$modeltheil[as.character(data$name) == name] <- as.data.frame(topPerformers(model))[3, 1]
+  data$metrictheil[as.character(data$name) == name] <- as.data.frame(topPerformers(model))[3, 2]
+  
+}
+
+# Save metrics to a file
+write.xlsx(data,
+           paste("./", "ticker_data.xlsx", sep = ""))
+```
+
