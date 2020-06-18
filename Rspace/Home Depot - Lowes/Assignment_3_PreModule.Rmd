@@ -1,0 +1,255 @@
+---
+title: 'Strategy, Change, and Analytics: Assignment - 3'
+author: "Krishna Prasad"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_notebook
+---
+
+
+```{r Check installed packages, echo = FALSE, warning=FALSE, message=FALSE}
+# Creating a vector of packages used within
+packages <- c('dplyr',
+              'caret',
+              'lubridate',
+              'magrittr',
+              'tidyverse',
+              'readxl')
+
+# Checking for package installations on the system and installing if not found
+if (length(setdiff(packages, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packages, rownames(installed.packages())))  
+}
+
+# Including the packages for use
+for(package in packages){
+  library(package, character.only = TRUE)
+}
+
+```
+
+
+#Assignment Instructions:
+The attached dataset includes data on each county in the United States, as well as how many Home Depot and Lowe’s locations there are in each county. The assignment (done individually) is to assess how these two chains make decisions on where to locate stores, whether they are different at all, and where they should consider opening new stores in the future.
+
+##Analysis Questions:
+
+1.	How do these two chains make their decisions about where to have store locations? What are the major criteria that drive this decision, and can you provide a very brief rationalization for each? Essentially, this question gets at how the two chains are similar in their decision making.
+- Both are very similar and focus on methods by Region, By Demographics, and By income available in the enviornment. 
+
+2.	Are there ways in which the two chains are different in the types of locations they target? What are those differences, and why do you think that they may be apparent in the data? Characterize the targeting strategies for each of the two chains.
+- Each of the locations have similar locations across the USA. However, across counties, 
+
+3.	What counties appear underserved in the data, by one or both store chains? Where would you expect Home Depot to open its next 2-3 locations? Lowe’s?
+
+```{r Read data, include=FALSE}
+
+
+#External Plot for Corr Plot 
+source("http://www.sthda.com/upload/rquery_cormat.r")
+
+#Consider only numeric columns plots.
+corr.plot.fn <- function(corr.data) {
+  corr.list <-
+    rquery.cormat(corr.data, type = "flatten", graph = FALSE)
+  cormat <- rquery.cormat(corr.data, graphType = "heatmap")
+  rquery.cormat(corr.data, type = "full")
+  corr.list$r
+}
+
+#Load the Data
+hl.data <- read_excel("HDL_Data.xls")
+
+hl.data <-
+      hl.data %>% rename_all(funs(str_replace(., " ", "_"))) %>% rename_all(tolower)
+
+#convert the factor for regions
+hl.data$r1 <- as.factor(hl.data$r1)
+hl.data$r2 <- as.factor(hl.data$r2)
+
+#Remove NAs
+hl.data <- hl.data %>%
+  drop_na()
+
+```
+
+####Reviewing correlation accross the data by year 2000 and 2010
+
+```{r Subsetting by 2000}
+##### 2000
+#Create 2000 Data Set
+hl.data_2000 <- hl.data %>%
+  select(ends_with("_2000"),-"areaname","county",-"state","r1","r2","Lcount","HDcount")
+#Correlation Data 
+corr.data.2000 <- hl.data_2000 %>%
+  select(-"r1", -"r2")
+#Correlation Plot
+corr.plot.fn(corr.data.2000)
+
+
+```
+
+```{r Subsetting by 2010}
+##### 2010
+#Create 2010 Data Set
+hl.data_2010 <- hl.data %>%
+  select(ends_with("_2010"),
+         -"areaname",
+         "county",
+         -"state",
+         "r1",
+         "r2",
+         "Lcount",
+         "HDcount")
+#Correlation Data
+corr.data.2010 <- hl.data_2010 %>%
+  select(-"r1", -"r2")
+#Correlation Plot
+corr.plot.fn(corr.data.2010)
+
+```
+
+###Reviewing the Stores output by State
+```{r Location Data}
+hl.data_loc <- hl.data %>% 
+  select(state, HDcount, Lcount) %>% 
+  gather(key = "location", value = "count", HDcount:Lcount) %>% 
+  group_by(state,location,count, add= TRUE) %>% 
+  summarise(count1 = sum(count)) %>% 
+  select(-"count") %>% 
+  rename(count = count1)
+
+#check the total number of stores by location
+hl.data_loc %>%
+    group_by(location) %>%
+    summarise(count = sum(count))
+
+#check the total number ofs stores by state
+hl.data_loc %>%
+    group_by(state, location) %>%
+    summarise(count = sum(count))
+
+# hl.data %>% 
+#   select(county, state, HDcount, Lcount) %>% 
+#   gather(key = "location", value = "count", HDcount:Lcount) %>% 
+#   group_by(county,location,count, add= TRUE) %>% 
+#   summarise(count1 = sum(count)) %>% 
+#   select(-"count") %>% 
+#   rename(count = count1)
+
+
+
+```
+
+###Reviewing the Stores output by Region
+![Caption](RDashboard.png)
+
+```{r Counts by Region}
+
+#Create dataframe for r1 regions to see the difference 
+hl.data_r1 <- hl.data %>% 
+  select(areaname, county, state, r1, r2, HDcount, Lcount) %>% 
+  group_by(r1) %>% 
+  summarise(Lcount_sum = sum(Lcount),
+            HDcount_sum = sum(HDcount)) 
+#melting to long format for graphing
+hl.data_r1<-reshape2::melt(hl.data_r1, id.vars='r1')
+
+#Create dataframe for r2 regions 
+hl.data_r2 <- hl.data %>% 
+  select(areaname, county, state, r1, r2, HDcount, Lcount) %>% 
+  group_by(r2) %>% 
+  summarise(Lcount_sum = sum(Lcount),
+            HDcount_sum = sum(HDcount))
+#melting to long format for graphing 
+hl.data_r2<-reshape2::melt(hl.data_r2, id.vars='r2')
+
+#Plot r1
+ggplot(hl.data_r1,
+       aes(x = r1,
+           y = value,
+           fill = variable)) +
+  ggthemes::theme_clean() +
+  geom_bar(stat = "identity", position = "dodge")
+
+#plot r2
+ggplot(hl.data_r2,
+       aes(x = r2,
+           y = value,
+           fill = variable)) +
+  ggthemes::theme_clean() +
+  geom_bar(stat = "identity", position = "dodge")
+
+```
+
+```{r Model1 VarImp}
+# Use Random Forest variable importance technique for variable selection
+# The below list has been tailored after multiple iterations
+
+modelL<- Lcount~  r1 +r2 +pop_2000 +pop_2010 +income_2000 +income_2010 +pct_U18_2000 +pct_U18_2010 +pctcollege_2000 +pctcollege_2010 +ownhome_2000 +ownhome_2010 +density_2000 +density_2010 +pctwhite_2000 +pctwhite_2010 +pctblack_2000 +pctblack_2010
+
+
+fitL <- randomForest::randomForest(modelL,
+                                  data = hl.data,
+                                  mtry = 2,
+                                  importance = TRUE,
+                                  proximity = TRUE,
+                                  do.trace = 100)
+print(fitL)
+caret::varImp(fitL)
+randomForest::varImpPlot(fitL, type = 2)
+importanceOrder = order(-fitL$importance)
+varImp(fitL)
+
+```
+
+```{r Model2 VarImp}
+modelHD<- HDcount ~ r2 +r1 +pop_2000 +pop_2010 +income_2000 +income_2010 +pct_U18_2000 +pct_U18_2010 +pctcollege_2000 +pctcollege_2010 +ownhome_2000 +ownhome_2010 +density_2000 +density_2010 +pctwhite_2000 +pctwhite_2010 +pctblack_2000 +pctblack_2010
+
+
+fitHD <- randomForest::randomForest(modelHD,
+                                  data = hl.data,
+                                  mtry = 2,
+                                  importance = TRUE,
+                                  proximity = TRUE,
+                                  do.trace = 100)
+print(fitHD)
+caret::varImp(fitHD)
+randomForest::varImpPlot(fitHD, type = 2)
+importanceOrder = order(-fitHD$importance)
+varImp(fitHD)
+
+```
+
+```{r Differences}
+
+hl.data_county <- hl.data %>% 
+  select(county, HDcount, Lcount) %>% 
+  gather(key = "location", value = "count", HDcount:Lcount) %>% 
+  group_by(county,location,count, add= TRUE) %>% 
+  summarise(count1 = sum(count)) %>% 
+  select(-"count") %>% 
+  rename(count = count1)
+
+#check the total number of stores by location
+hl.data_county %>%
+    group_by(location) %>%
+    summarise(count = sum(count))
+
+#check the total number of counties that don't have any store
+hl.data_county_0<-hl.data_county %>%
+  filter(count == 0) %>% 
+  select(location, county, count) %>%
+  group_by(county) %>% 
+  select(-location) %>% 
+  distinct()
+
+ggplot(hl.data_county,
+       aes(x = location,
+           y = count,
+           fill = location)) +
+  ggthemes::theme_clean() +
+  geom_bar(stat = "identity", position = "dodge") 
+
+
+```
+

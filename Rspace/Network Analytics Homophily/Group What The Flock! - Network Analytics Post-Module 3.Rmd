@@ -1,0 +1,641 @@
+---
+title: 'Network Analytics: Post-Module 3<br>Twitter Assignment'
+author: 'Capstone Group What The Flock! <br> Ricky Cornejo, Christian Endter, Mariana Fanous, Tanu Kajla, and Krishna Prasad'
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+### Outline:
+
+      I. Network Metrics 
+
+      II. Power Law Distributions 
+      
+      III. Influential Nodes
+      
+      IV. Distinguishing Homophily from Influence
+
+\newpage
+
+```{r Env Setup, echo=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+
+# Creating a vector of packages used within
+packages <- c('readr',
+              'dplyr',
+              'knitr',
+              'scales',
+              'extrafont',
+              'ggthemes',
+              'ggplot2',
+              'tidyverse',
+              'Hmisc',
+              'ggpubr',
+              'igraph',
+              'data.table',
+              'visNetwork',
+              'magrittr',
+              'tinytex',
+              'tidyr',
+              'MatchIt',
+              'xtable',
+              'kableExtra')
+
+# Checking for package installations on the system and installing if not found
+if (length(setdiff(packages, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packages, rownames(installed.packages())))  
+}
+
+# Including the packages for use
+for(package in packages){
+  library(package, character.only = TRUE)
+}
+```
+
+### I. Network Metrics
+
+**1. The Alpha Centrality Calculation for Each Node** 
+
+```{r, Twitter Graph Subset, warning = FALSE, message = FALSE, echo=TRUE}
+
+# Reading in the Twitter Graph Subset
+
+tgraph_subset <-
+  read.graph(file = "twitter_graph_subset.txt",
+             format = "ncol",
+             directed = TRUE)
+
+# Step #1, Alpha Centrality Calculation
+
+ac <- alpha_centrality(tgraph_subset,
+                       nodes = V(tgraph_subset),
+                       alpha = 1)
+for (i in c("0",
+            "1",
+            "2",
+            "3",
+            "940",
+            "1147",
+            "48526",
+            "6497",
+            "18719",
+            "52513")) {
+  print(paste("The alpha centrality for node" , i, "is", ac[i]))
+}
+```
+
+\newpage
+
+**2. The Page Rank Calculation for Each Node** 
+
+```{r, Twitter Graph Complete Set, warning = FALSE, message = FALSE, echo=TRUE}
+
+# Reading in the Twitter Graph Complete Set
+
+tgraph_com <-
+  read.graph(file = "twitter_graph_complete.txt",
+             format = "ncol",
+             directed = TRUE)
+
+# Step #2, Calculating the Page Rank of requested Nodes
+
+pr <- page.rank(tgraph_com)$vector
+
+for (i in c("0",
+            "1",
+            "2",
+            "3",
+            "940",
+            "1147",
+            "48526",
+            "6497",
+            "18719",
+            "52513")) {
+  print(paste("The page rank for node" , i, "is", pr[i]))
+}
+```
+
+\newpage
+
+**3. The In-Degree Calculation for Each Node** 
+
+```{r, Twitter Graph Complete Set In-Degree Calculation, warning = FALSE, message = FALSE, echo=TRUE}
+
+ind <- degree(tgraph_com, v = V(tgraph_com), mode = "in")
+for (i in c("0",
+            "1",
+            "2",
+            "3",
+            "940",
+            "1147",
+            "48526",
+            "6497",
+            "18719",
+            "52513")) {
+  print(paste("The in-degree for node" , i, "is", ind[i]))
+}
+```
+
+\newpage
+
+**4. Log Scale Scatter Plot with In-Degree and Page Rank for ALL nodes** 
+
+We produced two separate graphs. 
+  + The first graph is the log-log.
+  + The second graph is the ABS of Page Rank. 
+
+_The log-log shows Page Rank has negative values. ABS of Page Rank is easier to analyze. Overall, analyzing the graph of Page Rank and In Degree on a log-log scale, we can clearly see a positive correlation with Page Rank and In Degree. As In Degree Increases, Page Rank also increases for the Twitter Graph Complete Set. This "straight line" that we graphed on a log-log plot is analogous of a Power Law Distribution for the Twitter Network, however, we cannot conclude that from the two graphs alone.  Further analysis must be carried out.  Lastly, there is a small cluster of Twitter users with a large In Degree (> 7.5) and a high Page Rank._
+
+```{r, Scatter Plot for In Degree and Page Rank, warning = FALSE, message = FALSE, echo=TRUE}
+
+
+# Build a Data Frame for In-Degree and Page Rank
+df <- data.frame(ind, pr)
+
+# Change the Variables to Log
+
+logg_pr <- log(df$pr)
+
+logg_ind <- log(df$ind)
+
+# Replace 0 valus with .1 value
+logg_ind[logg_ind == 0] <- 0.1
+
+#Defining my chart attributes
+mychartattributes <-
+  theme_bw() + theme(text = element_text(family = "serif")) + theme(
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "gray"),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+# Plot In-Degree (X-Axis) and Page Rank (Y-Axis)
+p4 <-
+  ggplot(df, aes(x = logg_ind, y = logg_pr)) + geom_point(
+    color = "#00AFBB",
+    fill = "#00AFBB",
+    size = 1.5,
+    shape = 1
+  ) + labs(
+    title = "Relationship between In-Degree and Page Rank of Twitter Users",
+    subtitle = "As In Degree Increases, Page Rank also increases for the Twitter Graph Complete Set",
+    caption = "Group: What The Flock | MSBA 2019",
+    x = "Log In Degree",
+    y = "Log Page Rank"
+  ) + mychartattributes + scale_y_continuous(labels = comma) + geom_smooth(
+    method = "lm",
+    se = FALSE,
+    fullrange = FALSE,
+    level = 1.0,
+    color = "black"
+  )
+p4 + xlim(0, 9)
+
+
+# Plot In-Degree (X-Axis) and Page Rank (Y-Axis) with ABS for Page Rank
+
+logg_pr <- abs(log(df$pr))
+
+p5 <-
+  ggplot(df, aes(x = logg_ind, y = logg_pr)) + geom_point(
+    color = "#00AFBB",
+    fill = "#00AFBB",
+    size = 1.5,
+    shape = 1
+  ) + labs(
+    title = "Relationship between In-Degree and Page Rank of Twitter Users",
+    subtitle = "As In Degree Increases, Page Rank also increases for the Twitter Graph Complete Set",
+    caption = "Group: What The Flock | MSBA 2019",
+    x = "Log In Degree",
+    y = "Log Page Rank (ABS)"
+  ) + mychartattributes + scale_y_continuous(labels = comma) + geom_smooth(
+    method = "lm",
+    se = FALSE,
+    fullrange = FALSE,
+    level = 1.0,
+    color = "black"
+  )
+p5 + xlim(0, 9) 
+```
+
+\newpage
+
+### II. Power Law Distributions
+
+The log-log plot of Number of Users (Y-Axis) and Number of Tweets (X-Axis) does in fact follow a Power Law Distribution.  On the plot, we clearly see this "non normal" distribution.  The characteristics of the plot, extreme right-skewness, top heavy, or heavily tailed distribution, are all attributes of the Power Law. Overall, the majority of Twitter users do not tweet that often. Yet, there is also a small group of Twitter users that have a large number of tweets, you see this growth along the x-axis and this results in the skewness.  
+
+```{r, Users NTweets, warning = FALSE, message = FALSE, echo=TRUE}
+
+# Reading in the Users NTweets CSV
+ntweets <- read.csv("users_ntweets.csv")
+
+# Replace Zero values in NTweets with a .1 Value
+ntweets [ntweets == 0] <- .1
+
+# Find Tweet Count for Each Specific User
+tweet_count_users <-
+  aggregate(data.frame(count = ntweets$ntweets),
+            list(ntweets = ntweets$ntweets),
+            length)
+
+logg_tweet_count_users <- log(tweet_count_users$ntweets)
+
+logg_number_of_users <- log(tweet_count_users$count)
+
+# Plot Log Number of Users (Y-Axis) and Log Number of TWeets (X-Axis)
+p6 <-
+  ggplot(tweet_count_users,
+         aes(x = logg_tweet_count_users, y = logg_number_of_users)) + geom_point(
+           color = "#00AFBB",
+           fill = "#00AFBB",
+           size = 2.0,
+           shape = 1
+         ) + labs(
+           title = "Relationship between Log Users and Log Number of Tweets",
+           subtitle = "Power Law Distribution, with majority of users rarely tweeting and a few users that tweet frequently",
+           caption = "Group: What The Flock | MSBA 2019",
+           x = "Log Number of Tweets",
+           y = "Log Number of Users"
+         ) + mychartattributes + scale_y_continuous(labels = comma) + stat_smooth(
+           se = FALSE,
+           fullrange = FALSE,
+           level = 1.0,
+           color = "black"
+         )
+p6 + xlim(0, 14) + ylim(0, 8)
+```
+
+\newpage
+
+### III. Influential Nodes
+
+**Average Number of Retweets Per Tweet** 
+
+_Please see the output table for the Top Ten Usernames with the highest "Past Local Influence"_
+
+```{r, Influential Nodes, Number of Re-Tweets In Tweets CSV File, warning = FALSE, message = FALSE, echo=TRUE}
+
+# Read in Tweets CSV
+tweets <- read.csv("tweets.csv")
+
+# Group By the Username of Tweeter
+username <- group_by(tweets, username)
+
+# Average number of Re-Tweets Calculation
+retweets <-
+  summarise(username,
+            average = mean(retweets, na.rm = TRUE),
+            count = n())
+ 
+top10_users <- head(arrange(retweets, desc(average)), n = 10)
+
+print(top10_users)
+
+```
+
+\newpage
+
+### IV. Distinguishing Homophily From Influence
+
+```{r, Homophily From Influence, warning = FALSE, message = FALSE, echo=TRUE}
+
+# Read In All The Files for Distinguishing Homophily
+
+worldcup <- read.csv("worldcup.csv")
+
+love <- read.csv("love.csv")
+
+selfie <- read.csv("selfie.csv")
+
+tbt <- read.csv("tbt.csv")
+
+all_users <- read.csv("all_users.csv")
+
+twitter_pairs <-
+  read_delim("twitter_graph_complete.txt", " ", col_names = FALSE)
+
+names(twitter_pairs) <- c("Node", "Follows")
+
+```
+
+```{r, Part A, Calculate Median of Adopter File, warning=FALSE, message=FALSE, echo=TRUE}
+
+# Median Calculations
+
+med_worldcup <- median(worldcup$timeStamp, na.rm = TRUE)
+
+#med_worldcup
+
+med_love <- median(love$timeStamp, na.rm = TRUE)
+
+#med_love
+
+med_selfie <- median(selfie$timeStamp, na.rm = TRUE)
+
+#med_selfie
+
+med_tbt <- median(tbt$timeStamp, na.rm = TRUE)
+
+#med_tbt
+
+med_all_users <- median(all_users$timeStamp, na.rm = TRUE)
+
+#med_all_users
+```
+
+```{r, Part B, Find Other Users That All Users Follow, warning=FALSE, message=FALSE, echo=TRUE}
+
+# Define Followers from tgraph complete file
+followers <- degree(tgraph_com, v = V(tgraph_com), mode = "out")
+
+# Map Users from all user file to the followers in twitter graph complete
+followers_all_users <- followers[as.character(all_users$id)]
+
+# Ensure that Users Followers are greater than 0
+followers_all_users <- all_users[all_users$followers > 0,]
+followers_all_users
+
+```
+
+##### Step 1: 
+From the complete twitter graph, find those nodes who have followers and map them into a new variable
+```{r Prep work - Users with followers}
+users_with_all_followers <- all_users %>%
+  inner_join(twitter_pairs, by = c("id" = "Node")) 
+```
+
+##### Step 2: 
+Next figure out who has been treated and who adopted, based on the following:
+
+*Treatment:*
+Condition (a) at least one person followed by user tweeted hashtag < median for hashtag
+Condition (b) user's last tweet was after median for hashtag
+
+*Adoption:* 
+User appears in respective hashtag file
+
+N.B.: We wrote this as a function which produces the aggregate output so that we don't need to replicate the code for each hashtag.
+
+```{r Treatment and Adoption Status}
+adoption_stats <- function(hashtag) {
+  # evaluate, get hashtag variable, calculate median, instantiate output variable
+  adopters <- eval(as.name(hashtag))
+  tmed <- median(adopters$timeStamp, na.rm = TRUE)
+  output <- list()
+  
+  # determine which users were treated
+  users_treated <- users_with_all_followers %>%
+    filter(Follows %in% filter(adopters, timeStamp < tmed)$id) %>%    # (a)
+    filter(timeStamp > tmed)                                          # (b)
+  
+  # distill the list of all users with all followers down to a list of distinct users and set their status
+  users_with_followers <- users_with_all_followers %>%
+    distinct(id, .keep_all = TRUE) %>%
+    mutate(Treatment = ifelse(id %in% users_treated$id, TRUE, FALSE)) %>%
+    mutate(Adoption = ifelse(id %in% adopters$id, TRUE, FALSE))
+  
+  # create the output tibble with the statistics
+  output$statistics_unmatched <- users_with_followers %>%
+    group_by(Treatment, Adoption) %>%
+    summarise(Numbers = n()) %>%
+    pivot_wider(names_from = Adoption, values_from = Numbers) %>%              # untangle the group tibble
+    rename(`Didn't Adopt` = `FALSE`, `Adopted` = `TRUE`) %>%                   # Give it clearer column names
+    mutate(Ratio = paste0(round(`Adopted` / `Didn't Adopt` * 100, 2), "%")) %>%
+    ungroup()
+  
+  # retrieve nplus, nminus and calculate runmatched and add all to the output
+  output$nplus <-
+    as_vector(output$statistics_unmatched %>% filter(Treatment == TRUE) %>% select(Adopted))
+  output$nminus <-
+    as_vector(output$statistics_unmatched %>% filter(Treatment == FALSE) %>% select(Adopted))
+  output$runmatched <- as_vector(output$nplus / output$nminus)
+  output$table <- tibble(
+    Treatment = c("TRUE", "FALSE", "RATIO"),
+    Adopted = c(output$nplus, output$nminus, output$runmatched)
+  )
+  
+  # pass along the data of users and their status
+  output$data <-
+    users_with_followers %>% ungroup   # ungroup should not be necessary
+  
+  return(output)
+}
+```
+
+##### Step 3:
+Propensity matching (logit) - Again done via a function, with a filter eliminating all those pairs whose scores differ by more than 2x the standard deviation of the differences in all scores.
+
+```{r Matching the sample via Propensity Scores}
+match_and_filter <- function(source_data, withReplacement = FALSE) {
+  # ensure replicability
+  set.seed(888)
+  output <- list()
+  
+  # use matchit for the matching
+  m <-
+    matchit(
+      Treatment ~ location + followers + friends + ntweets,
+      data = source_data,
+      method = "nearest",
+      distance = "logit",
+      ratio = 1,
+      replace = withReplacement
+    )
+  
+  # extract the pairs (awkward, need to use row-reference back to original dataset)
+  matched_pairs <- match.data(m)
+  pairs <-
+    tibble(Treated = rownames(m$match.matrix),
+           Untreated = m$match.matrix[, 1])
+  
+  # match.matrix contains all treated units, not just the ones that could be matched, remove
+  pairs <- pairs[!is.na(pairs$Untreated), ]
+  
+  # map in the actual id
+  pairs$TreatedID <- source_data[pairs$Treated, ]$id
+  pairs$UntreatedID <- source_data[pairs$Untreated, ]$id
+  
+  # Map in distance
+  pairs <-
+    left_join(
+      pairs,
+      dplyr::select(matched_pairs, id, TreatedScore = distance),
+      by = c("TreatedID" = "id")
+    )
+  pairs <-
+    left_join(
+      pairs,
+      dplyr::select(matched_pairs, id, UntreatedScore = distance),
+      by = c("UntreatedID" = "id")
+    )
+  
+  # calculate the absolute distance and standard deviation across all distances
+  pairs$Distance <- abs(pairs$TreatedScore - pairs$UntreatedScore)
+  sd_dist <- sd(pairs$Distance)
+  
+  # filter out those with distance values > 2 x Standard Deviation
+  pairs <- filter(pairs, Distance <= 2 * sd_dist)
+  
+  # turn into a long list of ids and map back to the matchit pairs set
+  # issue in previous code was that matchit set only includes each observation once, even if matched more often
+  matched_pairs_long <-
+    tibble(id = c(pairs$TreatedID, pairs$UntreatedID)) %>%
+    left_join(dplyr::select(matched_pairs, 1:9), by = "id")
+  
+  # prepare output
+  output$statistics_lmatched <- matched_pairs_long %>%
+    group_by(Treatment, Adoption) %>%
+    summarise(Numbers = n()) %>%
+    pivot_wider(names_from = Adoption, values_from = Numbers) %>%
+    rename(`Didn't Adopt` = `FALSE`, `Adopted` = `TRUE`) %>%
+    mutate(Ratio = paste0(round(`Adopted` / `Didn't Adopt` * 100, 2), "%")) %>%
+    ungroup()
+  
+  # retrieve nplus, nminus, and calculate rmatched and add all to the output
+  output$nplus <-
+    as_vector(output$statistics_lmatched %>% filter(Treatment == TRUE) %>% select(Adopted))
+  output$nminus <-
+    as_vector(output$statistics_lmatched %>% filter(Treatment == FALSE) %>% select(Adopted))
+  output$rmatched <- as_vector(output$nplus / output$nminus)
+  output$table <- tibble(
+    Treatment = c("TRUE", "FALSE", "RATIO"),
+    Adopted = c(output$nplus, output$nminus, output$rmatched)
+  )
+  
+  return(output)
+}
+```
+
+##### Step 4:
+Random matching of treated and untreated units - Again done via a function to avoid code duplication.
+
+```{r Matching the pairs randomly}
+rand_match <- function(source_data, withReplacement = FALSE) {
+  # Get all treated users
+  treated <- filter(source_data, Treatment == TRUE)
+  
+  # get sample of right size from all untreated users
+  untreated <-
+    filter(source_data, Treatment == FALSE) %>% sample_n(nrow(treated), replace = withReplacement)
+  
+  # make them one data set for easier manipulation
+  randomly_matched <- rbind(treated, untreated)
+  
+  # create the output table
+  output <- randomly_matched %>%
+    group_by(Treatment, Adoption) %>%
+    summarise(Numbers = n()) %>%
+    pivot_wider(names_from = Adoption, values_from = Numbers) %>%
+    rename(`Didn't Adopt` = `FALSE`, `Adopted` = `TRUE`) %>%
+    mutate(Ratio = paste0(round(`Adopted` / `Didn't Adopt` * 100, 2), "%")) %>%
+    ungroup()
+  
+  return (output)
+}
+
+
+rmatch <-
+  function(source_data,
+           nTrials = 100,
+           withReplacement = FALSE) {
+    # Note: This could be done more elegantly with replicate; create long tibble via unlist, then use apply
+    # Setup
+    output = list()
+    nplus <- 0
+    nminus <- 0
+    
+    # run the samples and add up the figures
+    for (i in 1:nTrials) {
+      x <- rand_match(source_data, withReplacement)
+      nplus <-
+        nplus + x %>% filter(Treatment == TRUE) %>% dplyr::select(Adopted)
+      nminus <-
+        nminus + x %>% filter(Treatment == FALSE) %>% dplyr::select(Adopted)
+    }
+    
+    # calculate nplus, nminus, rrandom and add all to the output
+    output$nplus <- as_vector(nplus / nTrials)
+    output$nminus <- as_vector(nminus / nTrials)
+    output$rrandom <- as_vector(output$nplus / output$nminus)
+    output$table <- tibble(
+      Treatment = c("TRUE", "FALSE", "RATIO"),
+      Adopted = c(output$nplus, output$nminus, output$rrandom)
+    )
+    
+    return(output)
+  }
+
+```
+
+##### Step 5:
+Creating and analysing the output - We use the preceding functions to calculate the ratio of treated to untreated adopters for each hashtag. Discussion follows below.
+
+```{r Calculation of Statistics and Output}
+final <- function(hashtag, withReplacement = FALSE) {
+  # Calculate the statistics and sort out the data for matching
+  unmatched <- adoption_stats(hashtag)
+  # Get the results for logit matches
+  lmatched <- match_and_filter(unmatched$data, withReplacement)
+  # Get the results for random matches
+  rmatched <- rmatch(unmatched$data, 100, withReplacement)
+  
+  output <- tibble(
+    Measure = c("N+", "N-", "Ratio"),
+    Unmatched = unmatched$table$Adopted,
+    PScore = lmatched$table$Adopted,
+    Random = rmatched$table$Adopted
+  )
+  return(output)
+  
+}
+```
+
+```{r}
+final("worldcup", TRUE) %>% kable(digits = 2) %>%
+  kable_styling(bootstrap_options = "hover") %>%
+  row_spec(3,
+           bold = T,
+           color = "black",
+           background = "lightgray")
+```
+
+```{r}
+final("selfie", TRUE) %>% kable(digits = 2) %>%
+  kable_styling(bootstrap_options = "hover") %>%
+  row_spec(3,
+           bold = T,
+           color = "black",
+           background = "lightgray")
+```
+
+```{r}
+final("love", TRUE) %>% kable(digits = 2) %>%
+  kable_styling(bootstrap_options = "hover") %>%
+  row_spec(3,
+           bold = T,
+           color = "black",
+           background = "lightgray")
+```
+
+```{r}
+final("tbt", TRUE) %>% kable(digits = 2) %>%
+  kable_styling(bootstrap_options = "hover") %>%
+  row_spec(3,
+           bold = T,
+           color = "black",
+           background = "lightgray")
+```
+
+
+### V. Conclusion
+
+For all four adopter files we found that our random matching estimates were greater than our matched sample estimates. This implies that random matching overestimates influence in the #worldcup, #love, #selfie, and #tbt files. This is what we expected to see and our results are similar to the results found by Aral, Muchnik, and Sundararajan in their research, “Distinguishing influence-based contagion from homophily-driven diffusion in dynamic networks”. In Aral, Muchnik, and Sundararajan’s analysis, they found random matching estimates were 7 times greater than their matched samples, implying that random matching overestimates influence by up to 700%. Our results did not have random matching over estimating influence at the same degree, but it was evident in our results nonetheless.
+
+We believe that our matched sampling ratios are lower than random matching because the propensity score matching that we implemented controls for confounding factors and overcomes selection bias by comparing observations that have the same likelihood of treatment (i.e. matching treated to untreated samples with the closest propensity scores). The propensity score matching we implemented also takes into account temporal clustering, by defining treatment with specific time constraints (i.e. one of the accounts they follow tweeted hashtag h before time t*h, and user's last tweet in all_users.csv is at some time tt > t*h).
+
+Random matching only matches treated to an untreated sample, and this is done at random. This process does not have the same stringent restrictions controlling for confounding factors, overcoming selection bias, and accounting for temporal clustering, as the propensity score matching outlined above. As a result, the random matching over estimates influence (has higher ratios), and the user could have been treated as a result of homophily and not influence.

@@ -1,0 +1,372 @@
+---
+title: 'Strategy, Change, and Analytics: PreModule Assignment 3'
+author: "Krishna Prasad"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_notebook
+---
+
+```{r Check installed packages, echo = FALSE, warning=FALSE, message=FALSE}
+# Creating a vector of packages used within
+packages <- c('dplyr',
+              'caret',
+              'lubridate',
+              'magrittr',
+              'tidyverse',
+              'readxl',
+              'Boruta')
+
+# Checking for package installations on the system and installing if not found
+if (length(setdiff(packages, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packages, rownames(installed.packages())))  
+}
+
+# Including the packages for use
+for(package in packages){
+  library(package, character.only = TRUE)
+}
+
+```
+
+
+#### Assignment Instructions:
+
+The attached dataset includes data on each county in the United States, as well as how many Home Depot and Lowe’s locations there are in each county. The assignment (done individually) is to assess how these two chains make decisions on where to locate stores, whether they are different at all, and where they should consider opening new stores in the future.
+
+##### Analysis Questions:
+
+1.	How do these two chains make their decisions about where to have store locations? What are the major criteria that drive this decision, and can you provide a very brief rationalization for each? Essentially, this question gets at how the two chains are similar in their decision making.
+
+2.	Are there ways in which the two chains are different in the types of locations they target? What are those differences, and why do you think that they may be apparent in the data? Characterize the targeting strategies for each of the two chains.
+
+3.	What counties appear underserved in the data, by one or both store chains? Where would you expect Home Depot to open its next 2-3 locations? Lowe’s?
+
+```{r Read data}
+
+#Load the Data
+hl.data <- read_excel("HDL_Data.xls")
+
+hl.data <-
+      hl.data %>% rename_all(funs(str_replace(., " ", "_"))) %>% rename_all(tolower)
+
+#convert the factor for regions
+hl.data$r1 <- as.factor(hl.data$r1)
+hl.data$r2 <- as.factor(hl.data$r2)
+
+#Remove NAs
+hl.data <- hl.data %>%
+  drop_na()
+
+```
+
+```{r Instantiate Corr Plots}
+#External Plot for Corr Plot 
+source("http://www.sthda.com/upload/rquery_cormat.r")
+source("http://goo.gl/UUyEzD")
+
+#Consider only numeric columns plots.
+corr.plot.fn <- function(corr.data) {
+  corr.list <-
+    rquery.cormat(corr.data, type = "flatten", graph = FALSE)
+  cormat <- rquery.cormat(corr.data, graphType = "heatmap")
+  rquery.cormat(corr.data, type = "full")
+  corr.list$r
+}
+```
+
+#### Reviewing correlation accross the data
+
+```{r Correlation Plot, dpi=150}
+
+#Create 2000 Data Set
+hl.corr.data <- hl.data %>%
+  select(-"areaname",-"county",-"state",-"r1", -"r2", -"lcount", -"hdcount")
+
+#Correlation Plot
+corr.plot.fn(hl.corr.data)
+
+```
+
+```{r}
+glimpse(hl.data)
+
+hl.hist.data <-
+  hl.data %>% dplyr::select(-c("areaname", "county", "state", "r1", "r2"))
+
+str(hl.hist.data)
+
+```
+
+#### Reviewing the Stores Output by State
+
+```{r Location Data}
+hl.data.loc <- hl.data %>%
+  select(state, hdcount, lcount) %>%
+  gather(key = "location", value = "count", hdcount:lcount) %>%
+  group_by(state, location, count, add = TRUE) %>%
+  summarise(count1 = sum(count)) %>%
+  select(-"count") %>%
+  rename(count = count1)
+
+#check the total number of stores by location
+hl.data.loc %>%
+    group_by(location) %>%
+    summarise(count = sum(count))
+
+#check the total number ofs stores by state
+hl.data.loc %>%
+    group_by(state, location) %>%
+    summarise(count = sum(count))
+
+# hl.data %>% 
+#   select(county, state, HDcount, Lcount) %>% 
+#   gather(key = "location", value = "count", HDcount:Lcount) %>% 
+#   group_by(county,location,count, add= TRUE) %>% 
+#   summarise(count1 = sum(count)) %>% 
+#   select(-"count") %>% 
+#   rename(count = count1)
+
+
+
+```
+
+
+```{r}
+
+h.data <- hl.data
+
+# h.data <- h.data %>% column_to_rownames(., var = "county")
+
+h.data <- h.data %>%
+  mutate(hd_flag = as.factor(if_else(h.data$hdcount == 0, "NO", "YES")))
+
+h.data <- h.data %>% select(-c("r1", "r2")) #"pctcollege_2000", "pctblack_2000", "ownhome_2000", "pct_u18_2010", "pctblack_2010"
+
+h.data <- h.data %>%
+  mutate(
+    log_density_2000 = log(density_2000),
+    log_density_2010 = log(density_2010)
+  ) 
+
+outlierKD(h.data, h.data$density_2010)
+
+h.data <- h.data[is.finite(h.data$hd_flag),]
+h.data <- h.data[is.finite(h.data$log_density_2000),]
+h.data <- h.data[is.finite(h.data$log_density_2010),]
+
+
+h.data <- h.data[complete.cases(h.data), ]
+
+
+colSums(is.na(h.data))
+```
+
+```{r Boruta}
+
+# Execute Boruta
+var.boruta <-
+  Boruta(
+    as.factor(hd_flag) ~ .,
+    data = h.data,
+    doTrace = 2
+  )
+
+# Plot importance based on the Z Scores
+lz <- lapply(1:ncol(var.boruta$ImpHistory), function(i)
+  var.boruta$ImpHistory[is.finite(var.boruta$ImpHistory[, i]), i])
+names(lz) <- colnames(var.boruta$ImpHistory)
+Labels <- sort(sapply(lz, median))
+plot(
+  var.boruta,
+  side = 1,
+  las = 2,
+  labels = names(Labels),
+  at = 1:ncol(var.boruta$ImpHistory),
+  cex.axis = 0.7
+)
+final.boruta <- TentativeRoughFix(var.boruta)
+getSelectedAttributes(final.boruta, withTentative = F)
+boruta.df <- attStats(final.boruta)
+print(boruta.df)
+
+```
+
+
+
+```{r}
+glmStepAIC <-
+  train(
+    as.factor(hd_flag) ~ ., data = h.data,
+    method = "glmStepAIC",
+    allowParallel = TRUE
+  )
+summary(glmStepAIC)
+varImp(glmStepAIC)
+plot(varImp(glmStepAIC))
+```
+
+
+```{r}
+model.glm <-
+  glm(
+    as.factor(hd_flag) ~ pop_2010 + income_2010 + ownhome_2010 + pctblack_2010,
+    data = h.data,
+    family = binomial
+  )
+
+summary(model.glm)
+
+glm.probs <- predict(model.glm,type = "response")
+results <- cbind(h.data, glm.probs)
+
+no.hd <-
+  results %>% select(
+    areaname,
+    county,
+    hdcount,
+    pop_2010,
+    income_2010,
+    ownhome_2010,
+    density_2010,
+    log_density_2010,
+    pctblack_2010,
+    pctwhite_2010,
+    state,
+    hd_flag,
+    glm.probs
+  ) %>%
+  filter(as.character(hd_flag) == "NO" &
+           results$glm.probs >= 0.95) %>%
+  arrange(desc(glm.probs))
+
+no.1.hd <-
+  results %>% select(
+    areaname,
+    county,
+    hdcount,
+    pop_2010,
+    income_2010,
+    ownhome_2010,
+    density_2010,
+    log_density_2010,
+    pctblack_2010,
+    pctwhite_2010,
+    state,
+    hd_flag,
+    glm.probs
+  ) %>%
+  filter(as.character(hd_flag) == "YES" &
+           results$hdcount == 1 &
+           results$glm.probs >= 0.95) %>%
+  arrange(desc(glm.probs))
+
+```
+
+```{r}
+
+l.data <- hl.data
+
+# h.data <- h.data %>% column_to_rownames(., var = "county")
+
+l.data <- l.data %>%
+  mutate(l_flag = as.factor(if_else(l.data$lcount == 0, "NO", "YES")))
+
+l.data <- l.data %>% select(-c("lcount", "hdcount", "r1", "r2"))
+
+l.data <- l.data %>%
+  mutate(
+    log_density_2000 = log(density_2000),
+    log_density_2010 = log(density_2010)
+  ) 
+outlierKD(l.data, l.data$density_2010)
+
+
+l.data <- l.data[is.finite(l.data$l_flag),]
+l.data <- l.data[is.finite(l.data$log_density_2000),]
+l.data <- l.data[is.finite(l.data$log_density_2010),]
+
+l.data <- l.data[complete.cases(l.data), ]
+
+colSums(is.na(l.data))
+```
+
+```{r Boruta For Lowes}
+
+# Execute Boruta
+var.boruta <-
+  Boruta(
+    as.factor(l_flag) ~ pop_2010 + ownhome_2010 + density_2010 + pctwhite_2010 + pctblack_2010,
+    data = l.data,
+    doTrace = 2
+  )
+
+# Plot importance based on the Z Scores
+lz <- lapply(1:ncol(var.boruta$ImpHistory), function(i)
+  var.boruta$ImpHistory[is.finite(var.boruta$ImpHistory[, i]), i])
+names(lz) <- colnames(var.boruta$ImpHistory)
+Labels <- sort(sapply(lz, median))
+plot(
+  var.boruta,
+  side = 1,
+  las = 2,
+  labels = names(Labels),
+  at = 1:ncol(var.boruta$ImpHistory),
+  cex.axis = 0.7
+)
+final.boruta <- TentativeRoughFix(var.boruta)
+getSelectedAttributes(final.boruta, withTentative = F)
+boruta.df <- attStats(final.boruta)
+print(boruta.df)
+
+```
+
+
+
+```{r}
+l.aic.data <- l.data %>% select(-c("county"))
+glmStepAIC <-
+  train(
+    l_flag ~ ., data = l.aic.data,
+    method = "glmStepAIC",
+    allowParallel = TRUE
+  )
+summary(glmStepAIC)
+# varImp(glmStepAIC)
+# plot(varImp(glmStepAIC))
+```
+
+
+```{r}
+
+model.ldata.glm <-
+  glm(
+    l_flag ~  pop_2010 + ownhome_2010 + pctwhite_2010 + pctblack_2010 + income_2010,
+    data = l.data,
+    family = binomial
+  )
+
+summary(model.ldata.glm)
+
+ldata.glm.probs <- predict(model.ldata.glm, type = "response")
+results.ldata <- cbind(l.data, ldata.glm.probs)
+
+no.l <-
+  results.ldata %>% select(areaname, county, state, pop_2010, ownhome_2010, density_2010, log_density_2010, pctwhite_2010, pctblack_2010, l_flag, ldata.glm.probs) %>%
+  filter(as.character(l_flag) == "NO" &
+           results.ldata$ldata.glm.probs >= 0.95) %>%
+  arrange(desc(ldata.glm.probs))
+
+no.l.1 <-
+  results.ldata %>% select(areaname, county, state, pop_2010, ownhome_2010, density_2010, log_density_2010, pctwhite_2010, pctblack_2010, l_flag, ldata.glm.probs) %>%
+  filter(as.character(l_flag) == "YES" &
+           results$lcount == 1 &
+           results.ldata$ldata.glm.probs >= 0.95) %>%
+  arrange(desc(ldata.glm.probs))
+
+```
+
+
+```{r}
+hl.data <- hl.data %>%
+  mutate(hd.pop2010.ratio = hdcount / pop_2010 * 10000) 
+```
+
