@@ -9,10 +9,10 @@ R Scripts:
 
 * Basic R Scripts for Practice
 * Houston Police Department Crime Data Analysis and Resource Allocation predictions
-* Fraud Detection using Performance Estimation Package
-* Stock Market Predictions using Performance Estimation Packages
-* Stock Closing Price Predictions using Quantmod and Performance Estimation Packages
-* Station Casino K-Means Cluster Analysis
-* Text Mining using quanteda and Performance Estimation Packages
+* Fraud Detection
+* Stock Market Predictions
+* Stock Closing Price Predictions
+* Station Casino - K-Means Cluster Analysis
+* Text Mining - Quanteda and Performance Estimation Packages
 * Home Depot and Lowes - Predict next store opening based on population and demographics
 * Network Analytics - Asses homophily in twitter data using propensity scoring model
