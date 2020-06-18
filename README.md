@@ -14,3 +14,5 @@ R Scripts:
 * Stock Closing Price Predictions using Quantmod and Performance Estimation Packages
 * Station Casino K-Means Cluster Analysis
 * Text Mining using quanteda and Performance Estimation Packages
+* Home Depot and Lowes - Predict next store opening based on population and demographics
+* Network Analytics - Asses homophily in twitter data using propensity scoring model
